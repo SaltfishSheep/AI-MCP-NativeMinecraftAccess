@@ -2,7 +2,7 @@
 
 # Native MC Mapping MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that provides Minecraft obfuscated name mapping lookups. Designed for AI coding agents writing [CustomNPCs](https://www.kodevelopment.nl/customnpcs/) (CNPC) scripts that need to access native Minecraft internals.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that provides Minecraft obfuscated name mapping lookups. Helps AI coding agents work with Minecraft's obfuscated Java internals — for modding, plugin development, Mixin, Access Transformers, reflection-based scripting, and more.
 
 ## What It Does
 
@@ -11,6 +11,18 @@ Minecraft's Java code is obfuscated at runtime — class, method, and field name
 - **Search obfuscated ↔ deobfuscated mappings** across 38 Minecraft versions (1.7.10 – 1.20.1)
 - **Auto-build mapping caches** on first use — downloads from NeoForge Maven and Mojang servers
 - **Boolean expression search** — `Entity&Player`, `(Block|Item)&client`, `func_149645`
+
+### Use Cases
+
+| Scenario | How This Helps |
+|----------|---------------|
+| **Forge / NeoForge modding** | Look up obfuscated method/field names when writing mixins or AT configs |
+| **Fabric modding** | Find intermediary ↔ named mappings for access wideners |
+| **Spigot / Paper plugins** | Resolve NMS (net.minecraft.server) class names across versions |
+| **Mixin / Access Transformers** | Discover the exact obfuscated name to target |
+| **Reflection-based code** | Find field/method names for `getDeclaredField`, `getMethod`, etc. |
+| **Scripting engines** | Resolve native Minecraft API names (CustomNPCs, CraftTweaker, etc.) |
+| **Porting mods** | Compare mappings between MC versions to find renamed APIs |
 
 ### MCP Tool
 
@@ -107,6 +119,8 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 | `func_70091_d` | Find a specific SRG method name by ID |
 | `KeyBinding` | All entries mentioning KeyBinding |
 | `m_91087_` | Find a TSRGv2 method (1.17+) |
+| `motionX\|motionY\|motionZ` | Find entity velocity/motion fields |
+| `setVelocity\|addVelocity` | Find methods related to entity momentum |
 
 **Expression syntax:**
 

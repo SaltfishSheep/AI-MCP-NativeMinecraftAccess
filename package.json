@@ -1,7 +1,7 @@
 {
   "name": "native-mc-mapping-mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for Minecraft obfuscated name mapping lookup (CustomNPCs scripting)",
+  "description": "MCP server for Minecraft obfuscated name mapping lookup — for modding, plugins, Mixin, reflection, and AI-assisted Minecraft development",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
