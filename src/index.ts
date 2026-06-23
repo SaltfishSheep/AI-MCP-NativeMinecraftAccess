@@ -2,7 +2,7 @@
 /**
  * MCP Server for Minecraft Native Mapping Lookup.
  *
- * Provides a single tool `search_native_mc` that searches Minecraft
+ * Provides a single tool `search` that searches Minecraft
  * obfuscated-to-deobfuscated name mappings. Automatically builds the
  * mapping cache on first use for a given MC version.
  *
@@ -17,24 +17,76 @@ import { buildMappingCache } from './builder/index.js';
 import {
   parseExpression,
   validateCache,
-  searchCache,
-  searchClasses,
+  searchCacheAll,
   invalidateCache,
 } from './search/index.js';
-import { CACHE_DIR, DEFAULT_LIMIT } from './types.js';
+import { CACHE_DIR, DEFAULT_LIMIT, ScoredMappingEntry } from './types.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SUPPORTED_VERSIONS = Object.keys(VERSION_TABLE).sort();
 
+const DEFAULT_OUTPUT =
+  '[%type%] %obf_class%/%obf_name% -> %deobf_class% %deobf_name% %srg_name% %obf_desc% %deobf_desc% %access% %is_static% %sideonly%';
+
+// ── Output formatting ────────────────────────────────────────────────────────
+
+/** Map a ScoredMappingEntry to a template variable dictionary. */
+function entryVars(entry: ScoredMappingEntry): Record<string, string> {
+  return {
+    type: entry.type,
+    obf_class: entry.obf_class,
+    deobf_class: entry.deobf_class,
+    obf_name: entry.obf_name,
+    deobf_name: entry.deobf_name,
+    srg_name: entry.srg_name,
+    obf_desc: entry.obf_desc,
+    deobf_desc: entry.deobf_desc,
+    access: entry.access,
+    is_static: entry.is_static,
+    sideonly: entry.sideonly,
+    match: entry.match.toFixed(1),
+    mismatch: String(entry.mismatch),
+  };
+}
+
+/**
+ * Apply an output template to a single entry.
+ * Template uses %variable% syntax (case-insensitive).
+ * After substitution, consecutive runs of 2+ spaces are collapsed to one.
+ */
+function formatEntry(entry: ScoredMappingEntry, template: string): string {
+  const vars = entryVars(entry);
+  // Build a case-insensitive lookup map
+  const lowerMap = new Map<string, string>();
+  for (const [k, v] of Object.entries(vars)) {
+    lowerMap.set(k.toLowerCase(), v);
+  }
+
+  const result = template.replace(/%([^%]+)%/gi, (_match, key: string) => {
+    return lowerMap.get(key.toLowerCase()) ?? '';
+  });
+
+  // Collapse consecutive 2+ spaces into a single space, then trim
+  return result.replace(/ {2,}/g, ' ').trim();
+}
+
+/**
+ * Strip % delimiters from a template to produce a human-readable format header.
+ * Example: "[%type%] %obf_class%/%obf_name%" → "[type] obf_class/obf_name"
+ */
+function formatHeader(template: string): string {
+  return template.replace(/%/g, '');
+}
+
 // ── MCP Server ───────────────────────────────────────────────────────────────
 
 const server = new McpServer({
-  name: 'native-mc-mapping-mcp-server',
+  name: 'native-mc-access-mcp-server',
   version: '1.0.0',
 });
 
-// ── Tool: search_native_mc ───────────────────────────────────────────────────
+// ── Tool: search ─────────────────────────────────────────────────────────────
 
 const SearchInputSchema = z.object({
   mc_version: z
@@ -47,10 +99,12 @@ const SearchInputSchema = z.object({
     .string()
     .min(1, 'Expression must not be empty')
     .describe(
-      `Boolean search expression. ` +
-        `Syntax: term (case-insensitive substring), a&b (AND), a|b (OR), {expr} (grouping with braces). ` +
+      `Boolean search expression (case-insensitive, exact case match scores higher). ` +
+        `Syntax: term, term:modifier (substring match in column), term::modifier (exact match in column), ` +
+        `a&b (AND), a|b (OR), {expr} (grouping with braces). ` +
+        `Modifiers: all, class, classname, package, name, method, field, desc, modifier, side. ` +
         `& has higher precedence than |. ` +
-        `Examples: "Entity&Player", "{Entity|Block}&client", "KeyBinding"`
+        `Examples: "Entity::classname", "walk:method&static::modifier", "net/minecraft/entity:package"`
     ),
   page: z
     .number()
@@ -65,61 +119,55 @@ const SearchInputSchema = z.object({
     .max(100)
     .default(DEFAULT_LIMIT)
     .describe(`Number of results per page (default: ${DEFAULT_LIMIT}, max: 100)`),
+  output: z
+    .string()
+    .default(DEFAULT_OUTPUT)
+    .describe(
+      `Output format template using %variable% syntax (case-insensitive). ` +
+        `Variables: %type%, %obf_class%, %obf_name%, %deobf_class%, %deobf_name%, ` +
+        `%srg_name%, %obf_desc%, %deobf_desc%, %access%, %is_static% (static/non-static), ` +
+        `%sideonly%, %match%, %mismatch%. ` +
+        `Consecutive spaces collapsed. Identical outputs deduplicated.`
+    ),
 });
 
 type SearchInput = z.infer<typeof SearchInputSchema>;
 
 server.registerTool(
-  'search_native_mc',
+  'search',
   {
-    title: 'Search Native MC Mapping',
-    description: `Search Minecraft obfuscated class/method/field name mappings.
+    title: 'Search Native MC Access',
+    description: `Search Minecraft obfuscated↔deobfuscated name mappings (classes/methods/fields).
 
-Looks up the mapping between obfuscated (runtime) names and deobfuscated (human-readable) names
-for Minecraft Java classes, methods, and fields. This is essential when writing mod code, plugins,
-or scripts that access native Minecraft internals via reflection or Mixin.
+expression syntax:
+  term — case-insensitive substring
+  term:modifier — substring match in column; term::modifier — exact match in column
+  a&b (AND) | a|b (OR) | {expr} (grouping). & has higher precedence than |.
+  "net.minecraft.Entity" auto-expands to "/" and "$" paths.
+  Cross-version tip: "Player&Entity" works better than "EntityPlayer".
 
-The tool automatically builds the mapping cache on first use for a given MC version (requires
-internet access to download from NeoForge Maven and Mojang servers). Subsequent searches for
-the same version use the cached data.
+Modifiers:
+  all (default) — all columns
+  class — obf_class, deobf_class (full path)
+  classname — class name after last '/'
+  package — package before last '/'
+  name — obf_name, deobf_name, srg_name (methods+fields)
+  method — same columns, methods only
+  field — same columns, fields only
+  desc — obf_desc, deobf_desc
+  modifier — access, is_static
+  side — sideonly (common/server/client)
 
-Search columns: obf_class, deobf_class, obf_name, deobf_name, srg_name, desc.
+Scoring: exact case hit = 1.0, case-insensitive = 0.5, then by mismatch (less unmatched chars ranks higher).
 
-Args:
-  mc_version (string): Minecraft version (e.g. "1.12.2", "1.20.1")
-  expression (string): Boolean search expression:
-    - term: case-insensitive substring match (e.g. "Entity", "Player")
-    - term:modifier: restrict match scope and type filter
-      Column modifiers:
-        all (default) — search all columns
-        class — search obf_class, deobf_class only
-        name — search obf_name, deobf_name, srg_name (methods+fields only)
-        desc — search desc only
-      Type filter modifiers:
-        method — methods only, search all columns
-        field — fields only, search all columns
-      Property filter modifiers:
-        static — static entries only
-        sideonly — common (non-side-specific) entries only
-    - a&b: AND (both must match), higher precedence
-    - a|b: OR (either must match)
-    - {expr}: grouping with braces: {a|b}&c
-    - Examples: "Entity&Player", "Potion:class&Duration:name", "walk:method&static", "{Entity|Block}&client"
-  page (number): Page number, 1-indexed (default: 1)
-  limit (number): Results per page (default: 20, max: 100)
-
-Results are sorted by match score (more terms matched = higher) then mismatch (shorter results = higher).
-
-Returns:
-  Formatted list of matching mappings showing:
-    [method/field] obf_class.obf_name -> deobf_class.deobf_name  srg=srg_name  desc=...  sideonly=...  match=...  mismatch=...
-
-Examples:
-  - search_native_mc("1.12.2", "Entity&Player") → entries with both "Entity" AND "Player"
-  - search_native_mc("1.12.2", "Potion:class&Duration:name") → class has "Potion", name has "Duration"
-  - search_native_mc("1.12.2", "walk:method&static") → static methods with "walk"
-  - search_native_mc("1.20.1", "{Block|Item}&client") → client-side Block or Item entries
-  - search_native_mc("1.12.2", "func_149645") → find a specific SRG method name`,
+Common patterns:
+  "Entity::classname" → exact class name only
+  "Gui:classname" → all classes containing "Gui"
+  "net/minecraft/inventory:package" → all classes under a package
+  "health:field" → fields only, no methods
+  "()Z:desc" → methods returning boolean
+  "get:method&static::modifier" → static methods containing "get"
+  output="%deobf_class%" → deduplicated class list`,
     inputSchema: SearchInputSchema,
     annotations: {
       readOnlyHint: true,
@@ -159,7 +207,7 @@ Examples:
 
       // Auto-build cache if missing or invalid
       if (!validateCache(params.mc_version)) {
-        console.error(`[native-mc-mapping] Cache missing for MC ${params.mc_version}, building...`);
+        console.error(`[native-mc-access] Cache missing for MC ${params.mc_version}, building...`);
         await buildMappingCache(params.mc_version, CACHE_DIR, false);
         if (!validateCache(params.mc_version)) {
           return {
@@ -174,10 +222,10 @@ Examples:
         invalidateCache();
       }
 
-      // Search
-      const result = searchCache(params.mc_version, astRoot, params.page, params.limit, CACHE_DIR);
+      // Search all matching entries (no pagination yet)
+      const allResults = searchCacheAll(params.mc_version, astRoot, CACHE_DIR);
 
-      if (result.total === 0) {
+      if (allResults.length === 0) {
         return {
           content: [
             {
@@ -188,201 +236,43 @@ Examples:
         };
       }
 
-      // Format output
-      const lines: string[] = [];
-      lines.push(
-        `Found ${result.total} results for "${params.expression}" in MC ${params.mc_version}` +
-          (result.totalPages > 1
-            ? ` (page ${result.page}/${result.totalPages})`
-            : '')
-      );
-      lines.push('');
+      // Format each entry with the output template
+      const formatted = allResults.map((entry) => formatEntry(entry, params.output));
 
-      for (let i = 0; i < result.results.length; i++) {
-        const entry = result.results[i];
-        const globalIdx = (result.page - 1) * result.limit + i + 1;
-        const desc = entry.desc ? `  desc=${entry.desc}` : '';
-        lines.push(
-          `  ${globalIdx}. [${entry.type}] ${entry.obf_class}.${entry.obf_name} -> ${entry.deobf_class}.${entry.deobf_name}  srg=${entry.srg_name}${desc}  sideonly=${entry.sideonly}  match=${entry.match.toFixed(1)} mismatch=${entry.mismatch}`
-        );
-      }
-
-      if (result.totalPages > 1 && result.page < result.totalPages) {
-        lines.push('');
-        lines.push(`Use page=${result.page + 1} to see more results.`);
-      }
-
-      return {
-        content: [{ type: 'text' as const, text: lines.join('\n') }],
-      };
-    } catch (error) {
-      return {
-        isError: true,
-        content: [
-          {
-            type: 'text' as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  }
-);
-
-// ── Tool: search_native_mc_class ─────────────────────────────────────────────
-
-const ClassSearchInputSchema = z.object({
-  mc_version: z
-    .string()
-    .describe(
-      `Minecraft version to search (e.g. "1.12.2", "1.20.1"). ` +
-        `Supported: ${SUPPORTED_VERSIONS.join(', ')}`
-    ),
-  expression: z
-    .string()
-    .min(1, 'Expression must not be empty')
-    .describe(
-      `Boolean search expression — matches only against class names (obf_class, deobf_class). ` +
-        `Syntax: term (case-insensitive substring), a&b (AND), a|b (OR), {expr} (grouping with braces). ` +
-        `Examples: "Entity&Player", "Potion|Effect", "net/minecraft/entity"`
-    ),
-  page: z
-    .number()
-    .int()
-    .min(1)
-    .default(1)
-    .describe('Page number (1-indexed). Default: 1'),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(100)
-    .default(DEFAULT_LIMIT)
-    .describe(`Number of results per page (default: ${DEFAULT_LIMIT}, max: 100)`),
-});
-
-type ClassSearchInput = z.infer<typeof ClassSearchInputSchema>;
-
-server.registerTool(
-  'search_native_mc_class',
-  {
-    title: 'Search Native MC Class Names',
-    description: `Search Minecraft obfuscated class name mappings (classes only).
-
-A fast lookup tool that returns unique class names matching the expression.
-Useful for quickly discovering which Minecraft classes are relevant before
-searching for specific methods/fields.
-
-The tool automatically builds the mapping cache on first use for a given MC version.
-
-Args:
-  mc_version (string): Minecraft version (e.g. "1.12.2", "1.20.1")
-  expression (string): Boolean search expression matching class names only:
-    - term: case-insensitive substring match (e.g. "Entity", "Potion")
-    - a&b: AND (both must match), higher precedence
-    - a|b: OR (either must match)
-    - {expr}: grouping with braces
-    - Examples: "Entity&Player", "Potion|Effect", "net/minecraft/entity"
-  page (number): Page number, 1-indexed (default: 1)
-  limit (number): Results per page (default: 20, max: 100)
-
-Returns:
-  Deduplicated list of matching classes:
-    obf_class -> deobf_class  match=...  mismatch=...
-
-Examples:
-  - search_native_mc_class("1.12.2", "Entity&Player") → classes with both "Entity" AND "Player"
-  - search_native_mc_class("1.12.2", "Potion|Effect") → classes with "Potion" OR "Effect"
-  - search_native_mc_class("1.20.1", "net/minecraft/world") → classes in the world package`,
-    inputSchema: ClassSearchInputSchema,
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (params: ClassSearchInput) => {
-    try {
-      // Validate MC version
-      if (!VERSION_TABLE[params.mc_version]) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error: MC version "${params.mc_version}" is not supported.\nSupported versions: ${SUPPORTED_VERSIONS.join(', ')}`,
-            },
-          ],
-        };
-      }
-
-      // Parse boolean expression
-      let astRoot;
-      try {
-        astRoot = parseExpression(params.expression);
-      } catch (e) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error: Invalid expression "${params.expression}": ${e instanceof Error ? e.message : String(e)}\nSyntax: term, a&b (AND), a|b (OR), {expr} (grouping with braces)`,
-            },
-          ],
-        };
-      }
-
-      // Auto-build cache if missing or invalid
-      if (!validateCache(params.mc_version)) {
-        console.error(`[native-mc-mapping] Cache missing for MC ${params.mc_version}, building...`);
-        await buildMappingCache(params.mc_version, CACHE_DIR, false);
-        if (!validateCache(params.mc_version)) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Error: Failed to build mapping cache for MC ${params.mc_version}. Check server logs for details.`,
-              },
-            ],
-          };
+      // Deduplicate identical formatted strings (preserving first occurrence order)
+      const seen = new Set<string>();
+      const deduplicated: { formatted: string; entry: ScoredMappingEntry }[] = [];
+      for (let i = 0; i < formatted.length; i++) {
+        if (!seen.has(formatted[i])) {
+          seen.add(formatted[i]);
+          deduplicated.push({ formatted: formatted[i], entry: allResults[i] });
         }
-        invalidateCache();
       }
 
-      // Search classes only
-      const result = searchClasses(params.mc_version, astRoot, params.page, params.limit, CACHE_DIR);
+      // Paginate
+      const total = deduplicated.length;
+      const totalPages = Math.max(1, Math.ceil(total / params.limit));
+      const clampedPage = Math.max(1, Math.min(params.page, totalPages));
+      const start = (clampedPage - 1) * params.limit;
+      const pageResults = deduplicated.slice(start, start + params.limit);
 
-      if (result.total === 0) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `No classes found for "${params.expression}" in MC ${params.mc_version}.`,
-            },
-          ],
-        };
-      }
-
-      // Format output
+      // Build output
       const lines: string[] = [];
+      lines.push(`Format: ${formatHeader(params.output)}`);
       lines.push(
-        `Found ${result.total} classes for "${params.expression}" in MC ${params.mc_version}` +
-          (result.totalPages > 1
-            ? ` (page ${result.page}/${result.totalPages})`
-            : '')
+        `Found ${total} results for "${params.expression}" in MC ${params.mc_version}` +
+          (totalPages > 1 ? ` (page ${clampedPage}/${totalPages})` : '')
       );
       lines.push('');
 
-      for (let i = 0; i < result.results.length; i++) {
-        const entry = result.results[i];
-        const globalIdx = (result.page - 1) * result.limit + i + 1;
-        lines.push(
-          `  ${globalIdx}. ${entry.obf_class} -> ${entry.deobf_class}  match=${entry.match.toFixed(1)} mismatch=${entry.mismatch}`
-        );
+      for (let i = 0; i < pageResults.length; i++) {
+        const globalIdx = start + i + 1;
+        lines.push(`  ${globalIdx}. ${pageResults[i].formatted}`);
       }
 
-      if (result.totalPages > 1 && result.page < result.totalPages) {
+      if (totalPages > 1 && clampedPage < totalPages) {
         lines.push('');
-        lines.push(`Use page=${result.page + 1} to see more results.`);
+        lines.push(`Use page=${clampedPage + 1} to see more results.`);
       }
 
       return {
@@ -407,7 +297,7 @@ Examples:
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('native-mc-mapping MCP server running via stdio');
+  console.error('native-mc-access MCP server running via stdio');
 }
 
 main().catch((error) => {

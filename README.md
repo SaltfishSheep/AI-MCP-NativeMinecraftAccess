@@ -28,8 +28,7 @@ Minecraft's Java code is obfuscated at runtime — class, method, and field name
 
 | Tool | Description |
 |------|-------------|
-| `search_native_mc` | Search Minecraft obfuscated class/method/field name mappings |
-| `search_native_mc_class` | Search class names only (deduplicated, for quick discovery) |
+| `search` | Search Minecraft obfuscated class/method/field name mappings |
 
 ## Quick Install (MCP Client)
 
@@ -40,8 +39,8 @@ Minecraft's Java code is obfuscated at runtime — class, method, and field name
 ### Step 1: Clone & Build
 
 ```bash
-git clone https://github.com/SaltfishSheep/AI-MCP-NativeMinecraftMapping.git
-cd AI-MCP-NativeMinecraftMapping
+git clone https://github.com/SaltfishSheep/AI-MCP-NativeMinecraftAccess.git
+cd AI-MCP-NativeMinecraftAccess
 npm install
 npm run build
 ```
@@ -55,9 +54,9 @@ Add the following to your MCP client configuration:
 ```json
 {
   "mcpServers": {
-    "native-mc-mapping": {
+    "native-mc-access": {
       "command": "node",
-      "args": ["/absolute/path/to/AI-MCP-NativeMinecraftMapping/dist/index.js"]
+      "args": ["/absolute/path/to/AI-MCP-NativeMinecraftAccess/dist/index.js"]
     }
   }
 }
@@ -68,9 +67,9 @@ Add the following to your MCP client configuration:
 ```json
 {
   "mcp": {
-    "native-mc-mapping": {
+    "native-mc-access": {
       "type": "local",
-      "command": ["node", "/absolute/path/to/AI-MCP-NativeMinecraftMapping/dist/index.js"],
+      "command": ["node", "/absolute/path/to/AI-MCP-NativeMinecraftAccess/dist/index.js"],
       "enabled": true
     }
   }
@@ -82,9 +81,9 @@ Add the following to your MCP client configuration:
 ```json
 {
   "mcpServers": {
-    "native-mc-mapping": {
+    "native-mc-access": {
       "command": "node",
-      "args": ["/absolute/path/to/AI-MCP-NativeMinecraftMapping/dist/index.js"]
+      "args": ["/absolute/path/to/AI-MCP-NativeMinecraftAccess/dist/index.js"]
     }
   }
 }
@@ -95,9 +94,9 @@ Add the following to your MCP client configuration:
 ```json
 {
   "mcpServers": {
-    "native-mc-mapping": {
+    "native-mc-access": {
       "command": "node",
-      "args": ["/absolute/path/to/AI-MCP-NativeMinecraftMapping/dist/index.js"]
+      "args": ["/absolute/path/to/AI-MCP-NativeMinecraftAccess/dist/index.js"]
     }
   }
 }
@@ -107,10 +106,10 @@ Add the following to your MCP client configuration:
 
 ## Usage
 
-Once configured, your AI agent can call the `search_native_mc` tool:
+Once configured, your AI agent can call the `search` tool:
 
 ```
-search_native_mc(mc_version="1.12.2", expression="Entity&Player")
+search(mc_version="1.12.2", expression="Entity&Player")
 ```
 
 **Example queries:**
@@ -118,35 +117,43 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 | Query | Description |
 |-------|-------------|
 | `Entity&Player` | Entries containing both "Entity" AND "Player" |
+| `Entity::classname` | Class name exactly "Entity" |
+| `walk:method` | Methods with "walk" in name |
+| `static::modifier` | is_static or access exactly "static" |
+| `Potion:classname&Duration:name` | Class name "Potion", name "Duration" |
 | `{Block\|Item}&client` | Client-side Block or Item entries |
 | `func_70091_d` | Find a specific SRG method name by ID |
 | `KeyBinding` | All entries mentioning KeyBinding |
-| `m_91087_` | Find a TSRGv2 method (1.17+) |
-| `motionX\|motionY\|motionZ` | Find entity velocity/motion fields |
-| `setVelocity\|addVelocity` | Find methods related to entity momentum |
+| `output="%deobf_class%"` | Deduplicated class list |
 
 **Expression syntax:**
 
-| Operator | Meaning | Example |
-|----------|---------|---------|
-| `term` | Case-insensitive substring match | `KeyBinding` |
-| `term:modifier` | Restrict match scope or type | `Potion:class`, `walk:method`, `Z:desc` |
+| Syntax | Meaning | Example |
+|--------|---------|---------|
+| `term` | Case-insensitive substring match (exact case scores higher) | `KeyBinding` |
+| `term:modifier` | Restrict search to specific columns | `Potion:classname`, `walk:method` |
+| `term::modifier` | Strong modifier — exact match required | `Entity::classname` |
+| `net.minecraft.Entity` | Dot notation — matches `net/minecraft/Entity` and `net/minecraft$Entity` | `net.minecraft.entity.Entity` |
 | `&` | AND (both must match, higher precedence) | `Entity&Living` |
 | `\|` | OR (either must match) | `Entity\|Player` |
-| `{}` | Grouping (braces, to avoid conflict with Java descriptors) | `{a\|b}&c` |
+| `{}` | Grouping | `{a\|b}&c` |
 
 **Modifiers:**
 
-| Modifier | Effect | Example |
-|----------|--------|---------|
-| `all` | Search all columns (default) | `Entity:all` |
-| `class` | Search class names only | `Potion:class` |
-| `name` | Search field/method names (methods+fields only) | `Duration:name` |
-| `desc` | Search descriptor only | `()Z:desc` |
-| `method` | Methods only | `walk:method` |
-| `field` | Fields only | `health:field` |
-| `static` | Static entries only | `get:static` |
-| `sideonly` | Common (non-side-specific) entries only | `Entity:sideonly` |
+| Modifier | Searches | Description |
+|----------|----------|-------------|
+| `all` | all columns | Default — searches everything |
+| `class` | obf_class, deobf_class | Full class path (e.g. `net/minecraft/entity/Entity`) |
+| `classname` | deobf_class (after last `/`) | Class name only (e.g. `Entity` from `net/minecraft/entity/Entity`) |
+| `package` | deobf_class (before last `/`) | Package only (e.g. `net/minecraft/entity`) |
+| `name` | obf_name, deobf_name, srg_name | Field/method names (methods+fields only) |
+| `method` | obf_name, deobf_name, srg_name | Method names only (filters type=method) |
+| `field` | obf_name, deobf_name, srg_name | Field names only (filters type=field) |
+| `desc` | obf_desc, deobf_desc | Method descriptors |
+| `modifier` | access, is_static | Access level and static status |
+| `side` | sideonly | Side filter (common/server/client) |
+
+Tips: Use `Player&Entity` instead of `PlayerEntity` for cross-version compatibility, as naming conventions differ across MC versions.
 
 ## Supported Versions
 
@@ -180,7 +187,7 @@ Found 382 results for "Entity&Player" in MC 1.12.2 (page 1/39)
 ## Project Structure
 
 ```
-AI-MCP-NativeMinecraftMapping/
+AI-MCP-NativeMinecraftAccess/
 ├── package.json
 ├── tsconfig.json
 ├── src/

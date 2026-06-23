@@ -13,8 +13,10 @@ export interface MappingEntry {
   obf_name: string;
   deobf_name: string;
   srg_name: string;
-  desc: string;
-  is_static: boolean;
+  obf_desc: string;
+  deobf_desc: string;
+  access: 'public' | 'protected' | 'default' | 'private' | '';
+  is_static: 'static' | 'non-static';
   sideonly: 'common' | 'server' | 'client';
 }
 
@@ -45,4 +47,4 @@ export const SIDE_MAP: Record<string, MappingEntry['sideonly']> = {
 
 export const DEFAULT_LIMIT = 20;
 export const CACHE_DIR = '.mapping-caches';
-export const SEARCH_COLUMNS = ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name'] as const;
+export const SEARCH_COLUMNS = ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'obf_desc', 'deobf_desc', 'access', 'is_static'] as const;

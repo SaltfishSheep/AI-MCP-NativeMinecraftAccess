@@ -18,8 +18,48 @@ import {
 /**
  * Check if a method is static by looking up its SRG name.
  */
-function checkStatic(srgName: string, staticMethods: Set<string>): boolean {
-  return staticMethods.has(srgName.replace(/_+$/, ''));
+function checkStatic(srgName: string, staticMethods: Set<string>): 'static' | 'non-static' {
+  return staticMethods.has(srgName.replace(/_+$/, '')) ? 'static' : 'non-static';
+}
+
+/**
+ * Convert a JVM type descriptor by replacing obfuscated class names with deobfuscated ones.
+ * Example: (Lbhy;)Z -> (Lnet/minecraft/client/settings/KeyBinding;)Z
+ */
+function convertDescriptor(obfDesc: string, classMap: Map<string, string>): string {
+  let result = '';
+  let i = 0;
+  while (i < obfDesc.length) {
+    const ch = obfDesc[i];
+    if (ch === 'L') {
+      // Read class name until ';'
+      let className = '';
+      i++; // skip 'L'
+      while (i < obfDesc.length && obfDesc[i] !== ';') {
+        className += obfDesc[i];
+        i++;
+      }
+      if (i < obfDesc.length) i++; // skip ';'
+      const deobfName = classMap.get(className) ?? className;
+      result += 'L' + deobfName + ';';
+    } else {
+      result += ch;
+      i++;
+    }
+  }
+  return result;
+}
+
+/**
+ * Compute deobf_desc for all entries using the class mapping.
+ * Only method entries with obf_desc get a computed deobf_desc.
+ */
+function computeDeobfDesc(entries: MappingEntry[], classMap: Map<string, string>): void {
+  for (const entry of entries) {
+    if (entry.type === 'method' && entry.obf_desc) {
+      entry.deobf_desc = convertDescriptor(entry.obf_desc, classMap);
+    }
+  }
 }
 
 /**
@@ -93,7 +133,9 @@ function mergeCsvMethods(
         obf_name: info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        desc: info.descriptor,
+        access: '',
+        obf_desc: info.descriptor,
+        deobf_desc: '',
         is_static: checkStatic(srgName, staticMethods),
         sideonly,
       });
@@ -105,8 +147,10 @@ function mergeCsvMethods(
         obf_name: '',
         deobf_name: deobfName,
         srg_name: srgName,
-        desc: '',
-        is_static: false,
+        access: '',
+        obf_desc: '',
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly,
       });
     }
@@ -138,8 +182,10 @@ function mergeCsvFieldsSrg(
         obf_name: info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        desc: '',
-        is_static: false,
+        access: '',
+        obf_desc: '',
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly,
       });
     } else {
@@ -150,8 +196,10 @@ function mergeCsvFieldsSrg(
         obf_name: '',
         deobf_name: deobfName,
         srg_name: srgName,
-        desc: '',
-        is_static: false,
+        access: '',
+        obf_desc: '',
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly,
       });
     }
@@ -210,8 +258,10 @@ function mergeCsvFieldsTsrg(
         obf_name: srgMatch.tsrg_info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        desc: '',
-        is_static: false,
+        access: '',
+        obf_desc: '',
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly,
       });
       continue;
@@ -227,8 +277,10 @@ function mergeCsvFieldsTsrg(
         obf_name: mojangMatch.tsrg_info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        desc: '',
-        is_static: false,
+        access: '',
+        obf_desc: '',
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly,
       });
       continue;
@@ -242,8 +294,10 @@ function mergeCsvFieldsTsrg(
       obf_name: '',
       deobf_name: deobfName,
       srg_name: srgName,
-      desc: '',
-      is_static: false,
+      access: '',
+      obf_desc: '',
+      deobf_desc: '',
+      is_static: 'non-static',
       sideonly,
     });
   }
@@ -271,8 +325,10 @@ function addConstructorEntries(
     obf_name: '<init>',
     deobf_name: '<init>',
     srg_name: '<init>',
-    desc: ctor.descriptor,
-    is_static: false,
+    access: '' as const,
+    obf_desc: ctor.descriptor,
+    deobf_desc: '',
+    is_static: 'non-static',
     sideonly: 'common' as const,
   }));
 }
@@ -307,6 +363,9 @@ export async function buildLegacySrg(mcVersion: string, config: VersionConfig): 
   console.error('[3/3] Merging data...');
   const entries = mergeCsvMethods(csvMethods, srgMethods, staticMethods);
   entries.push(...mergeCsvFieldsSrg(csvFields, srgFields));
+
+  const classMap = buildClassMap(srgMethods, srgFields);
+  computeDeobfDesc(entries, classMap);
 
   return entries;
 }
@@ -347,6 +406,7 @@ export async function buildLegacy(mcVersion: string, config: VersionConfig): Pro
   // Add constructor entries using class_map for efficient lookup
   const classMap = buildClassMap(tsrgMethods, tsrgFields);
   entries.push(...addConstructorEntries(constructors, classMap));
+  computeDeobfDesc(entries, classMap);
 
   return entries;
 }
@@ -407,7 +467,9 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
         obf_name: obfName,
         deobf_name: proguardMatch.deobf_name,
         srg_name: srgName,
-        desc: tsrgInfo.descriptor,
+        access: '',
+        obf_desc: tsrgInfo.descriptor,
+        deobf_desc: '',
         is_static: checkStatic(srgName, staticMethods),
         sideonly: 'common',
       });
@@ -419,7 +481,9 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
         obf_name: obfName,
         deobf_name: srgName,
         srg_name: srgName,
-        desc: tsrgInfo.descriptor,
+        access: '',
+        obf_desc: tsrgInfo.descriptor,
+        deobf_desc: '',
         is_static: checkStatic(srgName, staticMethods),
         sideonly: 'common',
       });
@@ -428,10 +492,12 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
 
   // Merge fields from TSRG with ProGuard
   for (const [key, tsrgInfo] of tsrgFields.entries()) {
-    const [obfClass, mojangName] = key.split('\0');
+    const [obfClass, col2] = key.split('\0');
     const obfName = tsrgInfo.obf_name;
     const proguardKey = `${obfClass}\0${obfName}\0field`;
     const proguardMatch = proguardMap.get(proguardKey);
+    // col2 is SRG name (field_xxxx) or Mojang name
+    const srgName = col2.startsWith('field_') ? col2 : '';
 
     if (proguardMatch) {
       entries.push({
@@ -440,9 +506,11 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
         type: 'field',
         obf_name: obfName,
         deobf_name: proguardMatch.deobf_name,
-        srg_name: '',
-        desc: '',
-        is_static: false,
+        srg_name: srgName,
+        access: '',
+        obf_desc: '',
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly: 'common',
       });
     } else {
@@ -451,14 +519,24 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
         deobf_class: obfClass,
         type: 'field',
         obf_name: obfName,
-        deobf_name: mojangName,
-        srg_name: '',
-        desc: '',
-        is_static: false,
+        deobf_name: col2,
+        srg_name: srgName,
+        access: '',
+        obf_desc: '',
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly: 'common',
       });
     }
   }
+
+  const classMap = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.obf_class && entry.deobf_class) {
+      classMap.set(entry.obf_class, entry.deobf_class);
+    }
+  }
+  computeDeobfDesc(entries, classMap);
 
   return entries;
 }
@@ -518,7 +596,9 @@ export async function buildModern(mcVersion: string, config: VersionConfig): Pro
         obf_name: tsrgEntry.obf_name,
         deobf_name: proguardMatch.deobf_name,
         srg_name: tsrgEntry.srg_name,
-        desc: tsrgEntry.descriptor,
+        access: '',
+        obf_desc: tsrgEntry.descriptor,
+        deobf_desc: '',
         is_static: tsrgEntry.is_static,
         sideonly: 'common',
       });
@@ -530,7 +610,9 @@ export async function buildModern(mcVersion: string, config: VersionConfig): Pro
         obf_name: tsrgEntry.obf_name,
         deobf_name: '',
         srg_name: tsrgEntry.srg_name,
-        desc: tsrgEntry.descriptor,
+        access: '',
+        obf_desc: tsrgEntry.descriptor,
+        deobf_desc: '',
         is_static: tsrgEntry.is_static,
         sideonly: 'common',
       });
@@ -547,12 +629,22 @@ export async function buildModern(mcVersion: string, config: VersionConfig): Pro
         obf_name: proguardEntry.obf_name,
         deobf_name: proguardEntry.deobf_name,
         srg_name: '',
-        desc: proguardEntry.descriptor,
-        is_static: false,
+        access: '',
+        obf_desc: proguardEntry.descriptor,
+        deobf_desc: '',
+        is_static: 'non-static',
         sideonly: 'common',
       });
     }
   }
+
+  const classMap = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.obf_class && entry.deobf_class) {
+      classMap.set(entry.obf_class, entry.deobf_class);
+    }
+  }
+  computeDeobfDesc(entries, classMap);
 
   return entries;
 }

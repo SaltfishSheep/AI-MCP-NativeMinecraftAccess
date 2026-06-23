@@ -1,21 +1,50 @@
 import { Buffer } from 'node:buffer';
 import { inflateRawSync } from 'node:zlib';
+import https from 'node:https';
+import http from 'node:http';
 
 // ============================================================================
-// HTTP Fetch Helpers (using built-in fetch, no external dependencies)
+// HTTP Fetch Helpers (using built-in https, no external dependencies)
 // ============================================================================
+
+function fetchUrl(url: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http;
+    const req = client.get(url, { headers: { 'User-Agent': 'MinecraftMappingCacheBuilder/1.0' } }, (res) => {
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        fetchUrl(res.headers.location).then(resolve, reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP error ${res.statusCode} fetching ${url}`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(120_000, () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
 
 export async function fetchBytes(url: string): Promise<Buffer> {
   console.error(`  Downloading: ${url}`);
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'MinecraftMappingCacheBuilder/1.0' },
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP error ${response.status} fetching ${url}: ${response.statusText}`);
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fetchUrl(url);
+    } catch (err) {
+      if (attempt < maxRetries) {
+        console.error(`  Retry ${attempt}/${maxRetries}...`);
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+      } else {
+        throw err;
+      }
+    }
   }
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  throw new Error('Unreachable');
 }
 
 export async function fetchText(url: string): Promise<string> {

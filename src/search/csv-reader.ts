@@ -1,11 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ScoredMappingEntry, SearchResult, CACHE_DIR, DEFAULT_LIMIT, SEARCH_COLUMNS, SIDE_MAP } from '../types.js';
-import { ASTNode, evaluateNode, extractTerms, forceClassModifier } from './expression.js';
+import { MappingEntry, ScoredMappingEntry, SearchResult, CACHE_DIR, DEFAULT_LIMIT, SEARCH_COLUMNS, SIDE_MAP } from '../types.js';
+import { ASTNode, evaluateNode, extractTerms, getColumnValue } from './expression.js';
 import { getPackageVersion, parseCsvLine } from '../util.js';
 
 function rowToEntry(row: Record<string, string>, matchScore: number, mismatchScore: number): ScoredMappingEntry {
   const sideRaw = row['sideonly'] ?? '0';
+  const accessRaw = row['access'] ?? '';
+  const validAccess = ['public', 'protected', 'default', 'private'].includes(accessRaw) ? accessRaw as MappingEntry['access'] : '';
+  const isStaticRaw = row['is_static'] ?? 'non-static';
   return {
     obf_class: row['obf_class'] ?? '',
     deobf_class: row['deobf_class'] ?? '',
@@ -13,8 +16,10 @@ function rowToEntry(row: Record<string, string>, matchScore: number, mismatchSco
     obf_name: row['obf_name'] ?? '',
     deobf_name: row['deobf_name'] ?? '',
     srg_name: row['srg_name'] ?? '',
-    desc: row['desc'] ?? '',
-    is_static: row['is_static'] === 'true' || row['is_static'] === '1',
+    obf_desc: row['obf_desc'] ?? '',
+    deobf_desc: row['deobf_desc'] ?? '',
+    access: validAccess,
+    is_static: isStaticRaw === 'static' ? 'static' : 'non-static',
     sideonly: SIDE_MAP[sideRaw] ?? 'common',
     match: matchScore,
     mismatch: mismatchScore,
@@ -26,7 +31,7 @@ function computeMismatch(row: Record<string, string>, terms: string[], modifierC
   let totalUnmatched = 0;
 
   for (const col of columns) {
-    const value = (row[col] ?? '').toLowerCase();
+    const value = getColumnValue(row, col).toLowerCase();
     if (value.length === 0) continue;
 
     // Track which character positions are captured by any term
@@ -163,48 +168,30 @@ export function searchCache(
   return { total, page: clampedPage, limit, totalPages, results };
 }
 
-/** Search for unique classes matching the expression (class columns only) */
-export function searchClasses(
+/** Return all matching entries sorted by score (no pagination). */
+export function searchCacheAll(
   mcVersion: string,
   astRoot: ASTNode,
-  page: number = 1,
-  limit: number = DEFAULT_LIMIT,
   cacheDir: string = CACHE_DIR
-): SearchResult {
-  const classAst = forceClassModifier(astRoot);
+): ScoredMappingEntry[] {
   const { rows } = getCachedRows(mcVersion, cacheDir);
-
-  if (rows.length === 0) {
-    return { total: 0, page, limit, totalPages: 0, results: [] };
-  }
+  if (rows.length === 0) return [];
 
   const terms = extractTerms(astRoot);
-  const seen = new Set<string>();
   const scored: ScoredMappingEntry[] = [];
 
   for (let i = 0; i < rows.length; i++) {
-    const result = evaluateNode(classAst, rows[i], SEARCH_COLUMNS);
+    const result = evaluateNode(astRoot, rows[i], SEARCH_COLUMNS);
     if (result.matched) {
-      const classKey = `${rows[i]['obf_class']}\0${rows[i]['deobf_class']}`;
-      if (!seen.has(classKey)) {
-        seen.add(classKey);
-        const mismatch = computeMismatch(rows[i], terms, result.modifierColumns);
-        scored.push(rowToEntry(rows[i], result.match, mismatch));
-      }
+      const mismatch = computeMismatch(rows[i], terms, result.modifierColumns);
+      scored.push(rowToEntry(rows[i], result.match, mismatch));
     }
   }
 
-  // Sort by match DESC, then mismatch ASC
   scored.sort((a, b) => {
     if (b.match !== a.match) return b.match - a.match;
     return a.mismatch - b.mismatch;
   });
 
-  const total = scored.length;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const clampedPage = Math.max(1, Math.min(page, totalPages));
-  const start = (clampedPage - 1) * limit;
-  const results = scored.slice(start, start + limit);
-
-  return { total, page: clampedPage, limit, totalPages, results };
+  return scored;
 }

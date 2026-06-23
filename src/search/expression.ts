@@ -4,7 +4,8 @@ export interface TermNode {
   type: 'term';
   term: string;           // lowercased, used for matching
   originalTerm: string;   // original case from user input, used for scoring
-  modifier?: 'all' | 'class' | 'name' | 'method' | 'field' | 'desc' | 'static' | 'sideonly';
+  modifier?: 'all' | 'class' | 'name' | 'method' | 'field' | 'desc' | 'modifier' | 'side' | 'classname' | 'package';
+  strongModifier?: boolean;
 }
 
 export interface AndNode {
@@ -31,35 +32,38 @@ export interface MatchResult {
   modifierColumns: readonly string[];
 }
 
-const VALID_MODIFIERS = new Set(['all', 'class', 'name', 'method', 'field', 'desc', 'static', 'sideonly']);
+const VALID_MODIFIERS = new Set(['all', 'class', 'name', 'method', 'field', 'desc', 'modifier', 'side', 'classname', 'package']);
 
 // Column sets for modifiers — determines which columns are searched and scored
 const MODIFIER_COLUMNS: Record<string, readonly string[]> = {
-  all:      ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
-  class:    ['obf_class', 'deobf_class'],
-  name:     ['obf_name', 'deobf_name', 'srg_name'],
-  method:   ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
-  field:    ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
-  desc:     ['desc'],
-  static:   ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
-  sideonly: ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
+  all:       ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'obf_desc', 'deobf_desc', 'access', 'is_static'],
+  class:     ['obf_class', 'deobf_class'],
+  classname: ['__classname__'],
+  package:   ['__package__'],
+  name:      ['obf_name', 'deobf_name', 'srg_name'],
+  method:    ['obf_name', 'deobf_name', 'srg_name'],
+  field:     ['obf_name', 'deobf_name', 'srg_name'],
+  desc:      ['obf_desc', 'deobf_desc'],
+  modifier:  ['access', 'is_static'],
+  side:      ['sideonly'],
 };
 
 // Type/property filters for modifiers
-// null = no filter, 'method' = methods only, 'field' = fields only,
-// 'method_or_field' = methods+fields, 'static' = static only, 'sideonly' = common only
+// null = no filter, 'method_or_field' = methods+fields only
 const MODIFIER_TYPE_FILTER: Record<string, string | null> = {
-  all:      null,
-  class:    null,
-  name:     'method_or_field',
-  method:   'method',
-  field:    'field',
-  desc:     null,
-  static:   'static',
-  sideonly: 'sideonly',
+  all:       null,
+  class:     null,
+  classname: null,
+  package:   null,
+  name:      'method_or_field',
+  method:    'method',
+  field:     'field',
+  desc:      null,
+  modifier:  null,
+  side:      null,
 };
 
-// Tokenizer: produces tokens '&', '|', '{', '}' , or a term string (potentially with :modifier)
+// Tokenizer: produces tokens '&', '|', '{', '}' , or a term string (potentially with :modifier or ::modifier)
 function tokenize(expr: string): string[] {
   const tokens: string[] = [];
   let i = 0;
@@ -75,29 +79,35 @@ function tokenize(expr: string): string[] {
       continue;
     }
     // Collect a term: contiguous non-special, non-whitespace characters
-    // Track colon position for modifier parsing
     let term = '';
-    let colonPos = -1;
+    let separatorPos = -1;
+    let isStrong = false;
     while (i < expr.length) {
       const c = expr[i];
       if (c === '&' || c === '|' || c === '{' || c === '}' || c === ' ' || c === '\t') {
         break;
       }
-      if (c === ':' && colonPos === -1) {
-        colonPos = term.length;
+      if (c === ':' && separatorPos === -1) {
+        separatorPos = term.length;
+        // Check for '::' (strong modifier)
+        if (i + 1 < expr.length && expr[i + 1] === ':') {
+          isStrong = true;
+          term += '::';
+          i += 2;
+          continue;
+        }
       }
       term += c;
       i++;
     }
     if (term.length > 0) {
-      if (colonPos >= 0) {
-        const termPart = term.substring(0, colonPos);
-        const modifierPart = term.substring(colonPos + 1);
+      if (separatorPos >= 0) {
+        const termPart = term.substring(0, separatorPos);
+        const modifierPart = isStrong ? term.substring(separatorPos + 2) : term.substring(separatorPos + 1);
         if (termPart.length > 0 && modifierPart.length > 0 && VALID_MODIFIERS.has(modifierPart)) {
-          // Valid modifier: emit termOriginal:termLower:modifier
-          tokens.push(termPart + ':' + termPart.toLowerCase() + ':' + modifierPart);
+          const suffix = isStrong ? ':strong' : '';
+          tokens.push(termPart + ':' + termPart.toLowerCase() + ':' + modifierPart + suffix);
         } else {
-          // Invalid modifier: emit termOriginal:termLower
           tokens.push(term + ':' + term.toLowerCase());
         }
       } else {
@@ -155,18 +165,49 @@ function parseAtom(tokens: string[], pos: number): [ASTNode, number] {
     throw new Error(`Unexpected operator '${token}' at position ${pos}`);
   }
   // It's a term — check for modifier
-  // Token format: "original:lower" or "original:lower:modifier"
+  // Token format: "original:lower" or "original:lower:modifier" or "original:lower:modifier:strong"
   const parts = token.split(':');
+  if (parts.length === 4 && parts[3] === 'strong') {
+    return [{ type: 'term', term: parts[1], originalTerm: parts[0], modifier: parts[2] as TermNode['modifier'], strongModifier: true }, pos + 1];
+  }
   if (parts.length === 3) {
-    // original:lower:modifier
     return [{ type: 'term', term: parts[1], originalTerm: parts[0], modifier: parts[2] as TermNode['modifier'] }, pos + 1];
   }
   if (parts.length === 2) {
-    // original:lower
     return [{ type: 'term', term: parts[1], originalTerm: parts[0] }, pos + 1];
   }
   // Fallback (shouldn't happen)
   return [{ type: 'term', term: token.toLowerCase(), originalTerm: token }, pos + 1];
+}
+
+/** Expand dot-notation class paths (e.g. "net.minecraft.Entity") into OR nodes
+ *  matching both slash paths ("net/minecraft/Entity") and inner class paths ("net/minecraft$Entity"). */
+function expandDotTerms(node: ASTNode): ASTNode {
+  switch (node.type) {
+    case 'term': {
+      if (node.term.includes('.')) {
+        const parts = node.term.split('.');
+        if (parts.length >= 2) {
+          const slashPath = parts.join('/');
+          const dollarPath = parts.slice(0, -1).join('/') + '$' + parts[parts.length - 1];
+          // Also expand the original term for scoring
+          const origParts = node.originalTerm.split('.');
+          const origSlashPath = origParts.join('/');
+          const origDollarPath = origParts.slice(0, -1).join('/') + '$' + origParts[origParts.length - 1];
+          return {
+            type: 'or',
+            left: { ...node, term: slashPath, originalTerm: origSlashPath },
+            right: { ...node, term: dollarPath, originalTerm: origDollarPath },
+          };
+        }
+      }
+      return node;
+    }
+    case 'and':
+      return { type: 'and', left: expandDotTerms(node.left), right: expandDotTerms(node.right) };
+    case 'or':
+      return { type: 'or', left: expandDotTerms(node.left), right: expandDotTerms(node.right) };
+  }
 }
 
 export function parseExpression(expr: string): ASTNode {
@@ -174,7 +215,7 @@ export function parseExpression(expr: string): ASTNode {
   if (tokens.length === 0) throw new Error('Empty expression');
   const [node, pos] = parseExpr(tokens, 0);
   if (pos < tokens.length) throw new Error(`Unexpected token '${tokens[pos]}' at position ${pos}`);
-  return node;
+  return expandDotTerms(node);
 }
 
 export function evaluateNode(
@@ -197,16 +238,10 @@ export function evaluateNode(
       if (typeFilter === 'method_or_field' && row['type'] !== 'method' && row['type'] !== 'field') {
         return { matched: false, match: 0, modifierColumns: [] };
       }
-      if (typeFilter === 'static' && row['is_static'] !== 'true') {
-        return { matched: false, match: 0, modifierColumns: [] };
-      }
-      if (typeFilter === 'sideonly' && row['sideonly'] !== 'common') {
-        return { matched: false, match: 0, modifierColumns: [] };
-      }
 
       // Column selection
       const columns = MODIFIER_COLUMNS[modifier] ?? searchColumns;
-      return matchTermInColumns(node.term, node.originalTerm, row, columns);
+      return matchTermInColumns(node.term, node.originalTerm, row, columns, node.strongModifier);
     }
     case 'and': {
       const left = evaluateNode(node.left, row, searchColumns);
@@ -234,19 +269,40 @@ function matchTermInColumns(
   term: string,
   originalTerm: string,
   row: Record<string, string>,
-  columns: readonly string[]
+  columns: readonly string[],
+  strongModifier?: boolean
 ): MatchResult {
   let bestMatch = 0;
   let bestCol = '';
   for (const col of columns) {
-    const value = row[col] ?? '';
-    if (value.includes(originalTerm)) {
-      return { matched: true, match: 1.0, modifierColumns: columns };
+    let value: string;
+    if (col === '__classname__') {
+      const deobfClass = row['deobf_class'] ?? '';
+      const lastSlash = deobfClass.lastIndexOf('/');
+      value = lastSlash >= 0 ? deobfClass.substring(lastSlash + 1) : deobfClass;
+    } else if (col === '__package__') {
+      const deobfClass = row['deobf_class'] ?? '';
+      const lastSlash = deobfClass.lastIndexOf('/');
+      value = lastSlash >= 0 ? deobfClass.substring(0, lastSlash) : '';
+    } else {
+      value = row[col] ?? '';
     }
-    if (value.toLowerCase().includes(term)) {
-      if (0.5 > bestMatch) {
-        bestMatch = 0.5;
-        bestCol = col;
+
+    if (strongModifier) {
+      // Strong modifier: exact case-sensitive match required
+      if (value === originalTerm) {
+        return { matched: true, match: 1.0, modifierColumns: columns };
+      }
+    } else {
+      // Normal modifier: case-insensitive substring match
+      if (value.includes(originalTerm)) {
+        return { matched: true, match: 1.0, modifierColumns: columns };
+      }
+      if (value.toLowerCase().includes(term)) {
+        if (0.5 > bestMatch) {
+          bestMatch = 0.5;
+          bestCol = col;
+        }
       }
     }
   }
@@ -265,14 +321,17 @@ export function extractTerms(node: ASTNode): string[] {
   }
 }
 
-/** Clone an AST node, forcing :class modifier on all terms */
-export function forceClassModifier(node: ASTNode): ASTNode {
-  switch (node.type) {
-    case 'term':
-      return { type: 'term', term: node.term, originalTerm: node.originalTerm, modifier: 'class' };
-    case 'and':
-      return { type: 'and', left: forceClassModifier(node.left), right: forceClassModifier(node.right) };
-    case 'or':
-      return { type: 'or', left: forceClassModifier(node.left), right: forceClassModifier(node.right) };
+/** Get the effective value for a column, handling virtual columns. */
+export function getColumnValue(row: Record<string, string>, col: string): string {
+  if (col === '__classname__') {
+    const deobfClass = row['deobf_class'] ?? '';
+    const lastSlash = deobfClass.lastIndexOf('/');
+    return lastSlash >= 0 ? deobfClass.substring(lastSlash + 1) : deobfClass;
   }
+  if (col === '__package__') {
+    const deobfClass = row['deobf_class'] ?? '';
+    const lastSlash = deobfClass.lastIndexOf('/');
+    return lastSlash >= 0 ? deobfClass.substring(0, lastSlash) : '';
+  }
+  return row[col] ?? '';
 }

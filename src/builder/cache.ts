@@ -23,7 +23,7 @@ function csvEscape(value: string): string {
  * Serialize a MappingEntry array to CSV string with header.
  */
 function entriesToCsv(entries: MappingEntry[]): string {
-  const header = 'obf_class,deobf_class,type,obf_name,deobf_name,srg_name,desc,is_static,sideonly';
+  const header = 'obf_class,deobf_class,type,obf_name,deobf_name,srg_name,obf_desc,deobf_desc,access,is_static,sideonly';
   const rows = entries.map((e) =>
     [
       csvEscape(e.obf_class),
@@ -32,8 +32,10 @@ function entriesToCsv(entries: MappingEntry[]): string {
       csvEscape(e.obf_name),
       csvEscape(e.deobf_name),
       csvEscape(e.srg_name),
-      csvEscape(e.desc),
-      e.is_static ? 'true' : 'false',
+      csvEscape(e.obf_desc),
+      csvEscape(e.deobf_desc),
+      csvEscape(e.access),
+      e.is_static,
       e.sideonly,
     ].join(',')
   );

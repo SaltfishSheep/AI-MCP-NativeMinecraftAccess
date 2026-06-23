@@ -246,7 +246,7 @@ interface Tsrgv2Entry {
   descriptor: string;
   srg_name: string;
   type: 'field' | 'method';
-  is_static: boolean;
+  is_static: 'static' | 'non-static';
 }
 
 /**
@@ -303,11 +303,11 @@ export function parseTsrgv2(content: string): Tsrgv2Entry[] {
     if (parts.length === 0) continue;
 
     // Check for static sub-line
-    let isStatic = false;
+    let isStatic: 'static' | 'non-static' = 'non-static';
     if (i < lines.length) {
       const nextLine = lines[i].trim();
       if (nextLine === 'static') {
-        isStatic = true;
+        isStatic = 'static';
         i++;
       }
     }
