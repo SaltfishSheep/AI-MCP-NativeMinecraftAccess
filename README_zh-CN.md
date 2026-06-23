@@ -68,7 +68,9 @@ npm run build
 {
   "mcp": {
     "native-mc-mapping": {
-      "command": ["node", "/绝对路径/to/AI-MCP-NativeMinecraftMapping/dist/index.js"]
+      "type": "local",
+      "command": ["node", "/绝对路径/to/AI-MCP-NativeMinecraftMapping/dist/index.js"],
+      "enabled": true
     }
   }
 }

@@ -28,12 +28,27 @@ export interface SearchParams {
   page?: number;
 }
 
+/** Result of evaluating a single AST node against a row */
+export interface MatchResult {
+  /** Whether the row matches the expression at all */
+  matched: boolean;
+  /** Match score: sum of per-term match values (exact=1.0, case-insensitive=0.5) */
+  match: number;
+}
+
+/** MappingEntry extended with scoring info */
+export interface ScoredMappingEntry extends MappingEntry {
+  match: number;
+  mismatch: number;
+}
+
+/** Updated SearchResult to use ScoredMappingEntry */
 export interface SearchResult {
   total: number;
   page: number;
-  pageSize: number;
+  limit: number;
   totalPages: number;
-  results: MappingEntry[];
+  results: ScoredMappingEntry[];
 }
 
 export const SIDE_MAP: Record<string, MappingEntry['sideonly']> = {
@@ -42,6 +57,9 @@ export const SIDE_MAP: Record<string, MappingEntry['sideonly']> = {
   '2': 'client',
 };
 
-export const PAGE_SIZE = 10;
+export const DEFAULT_LIMIT = 20;
 export const CACHE_DIR = '.mapping-caches';
 export const SEARCH_COLUMNS = ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name'] as const;
+export const CLASS_COLUMNS = ['obf_class', 'deobf_class'] as const;
+export const NAME_COLUMNS = ['obf_name', 'deobf_name', 'srg_name'] as const;
+export const DESC_COLUMNS = ['desc'] as const;

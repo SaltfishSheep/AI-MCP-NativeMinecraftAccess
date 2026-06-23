@@ -68,7 +68,9 @@ Add the following to your MCP client configuration:
 {
   "mcp": {
     "native-mc-mapping": {
-      "command": ["node", "/absolute/path/to/AI-MCP-NativeMinecraftMapping/dist/index.js"]
+      "type": "local",
+      "command": ["node", "/absolute/path/to/AI-MCP-NativeMinecraftMapping/dist/index.js"],
+      "enabled": true
     }
   }
 }
