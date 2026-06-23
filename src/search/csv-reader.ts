@@ -68,16 +68,39 @@ function rowToEntry(row: Record<string, string>, matchScore: number, mismatchSco
 }
 
 function computeMismatch(row: Record<string, string>, terms: string[], modifierColumns: readonly string[]): number {
-  let mismatch = 0;
   const columns = modifierColumns.length > 0 ? modifierColumns : SEARCH_COLUMNS;
+  let totalUnmatched = 0;
+
   for (const col of columns) {
     const value = (row[col] ?? '').toLowerCase();
-    const matchedByAnyTerm = terms.some(term => value.includes(term));
-    if (!matchedByAnyTerm) {
-      mismatch += (row[col] ?? '').length;
+    if (value.length === 0) continue;
+
+    // Track which character positions are captured by any term
+    const captured = new Uint8Array(value.length);
+
+    for (const term of terms) {
+      if (term.length === 0) continue;
+      let searchFrom = 0;
+      while (searchFrom <= value.length - term.length) {
+        const idx = value.indexOf(term, searchFrom);
+        if (idx === -1) break;
+        // Mark all positions of this match as captured
+        for (let k = idx; k < idx + term.length; k++) {
+          captured[k] = 1;
+        }
+        searchFrom = idx + 1;
+      }
     }
+
+    // Count uncaptured characters
+    let colMismatch = 0;
+    for (let k = 0; k < captured.length; k++) {
+      if (captured[k] === 0) colMismatch++;
+    }
+    totalUnmatched += colMismatch;
   }
-  return mismatch;
+
+  return totalUnmatched;
 }
 
 export function validateCache(mcVersion: string, cacheDir: string = CACHE_DIR): boolean {
