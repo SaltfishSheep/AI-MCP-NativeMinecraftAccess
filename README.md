@@ -133,7 +133,7 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 | `term:modifier` | Restrict match scope or type | `Potion:class`, `walk:method`, `Z:desc` |
 | `&` | AND (both must match, higher precedence) | `Entity&Living` |
 | `\|` | OR (either must match) | `Entity\|Player` |
-| `()` | Grouping | `(a\|b)&c` |
+| `{}` | Grouping (braces, to avoid conflict with Java descriptors) | `{a\|b}&c` |
 
 **Modifiers:**
 

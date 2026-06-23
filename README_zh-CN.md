@@ -133,7 +133,7 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 | `term:modifier` | 限制匹配范围或类型 | `Potion:class`、`walk:method`、`Z:desc` |
 | `&` | 且（两者都必须匹配，优先级更高） | `Entity&Living` |
 | `\|` | 或（任一匹配即可） | `Entity\|Player` |
-| `()` | 分组 | `(a\|b)&c` |
+| `{}` | 分组（花括号，避免与 Java 描述符冲突） | `{a\|b}&c` |
 
 **修饰符：**
 

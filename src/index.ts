@@ -102,8 +102,8 @@ Args:
         sideonly — common (non-side-specific) entries only
     - a&b: AND (both must match), higher precedence
     - a|b: OR (either must match)
-    - (expr): grouping
-    - Examples: "Entity&Player", "Potion:class&Duration:name", "walk:method&static"
+    - (expr): grouping with braces: {a|b}&c
+    - Examples: "Entity&Player", "Potion:class&Duration:name", "walk:method&static", "{Entity|Block}&client"
   page (number): Page number, 1-indexed (default: 1)
   limit (number): Results per page (default: 20, max: 100)
 
@@ -241,7 +241,7 @@ const ClassSearchInputSchema = z.object({
     .min(1, 'Expression must not be empty')
     .describe(
       `Boolean search expression — matches only against class names (obf_class, deobf_class). ` +
-        `Syntax: term (case-insensitive substring), a&b (AND), a|b (OR), (expr) (grouping). ` +
+        `Syntax: term (case-insensitive substring), a&b (AND), a|b (OR), {expr} (grouping with braces). ` +
         `Examples: "Entity&Player", "Potion|Effect", "net/minecraft/entity"`
     ),
   page: z

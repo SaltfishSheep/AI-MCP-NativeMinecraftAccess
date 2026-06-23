@@ -59,7 +59,7 @@ const MODIFIER_TYPE_FILTER: Record<string, string | null> = {
   sideonly: 'sideonly',
 };
 
-// Tokenizer: produces tokens '&', '|', '(', ')' , or a term string (potentially with :modifier)
+// Tokenizer: produces tokens '&', '|', '{', '}' , or a term string (potentially with :modifier)
 function tokenize(expr: string): string[] {
   const tokens: string[] = [];
   let i = 0;
@@ -69,7 +69,7 @@ function tokenize(expr: string): string[] {
       i++;
       continue;
     }
-    if (ch === '&' || ch === '|' || ch === '(' || ch === ')') {
+    if (ch === '&' || ch === '|' || ch === '{' || ch === '}') {
       tokens.push(ch);
       i++;
       continue;
@@ -80,7 +80,7 @@ function tokenize(expr: string): string[] {
     let colonPos = -1;
     while (i < expr.length) {
       const c = expr[i];
-      if (c === '&' || c === '|' || c === '(' || c === ')' || c === ' ' || c === '\t') {
+      if (c === '&' || c === '|' || c === '{' || c === '}' || c === ' ' || c === '\t') {
         break;
       }
       if (c === ':' && colonPos === -1) {
@@ -112,7 +112,7 @@ function tokenize(expr: string): string[] {
 // Grammar:
 //   or_expr  = and_expr ('|' and_expr)*
 //   and_expr = atom ('&' atom)*
-//   atom     = '(' or_expr ')' | term
+//   atom     = '{' or_expr '}' | term
 
 function parseExpr(tokens: string[], pos: number): [ASTNode, number] {
   let [left, newPos] = parseAnd(tokens, pos);
@@ -141,15 +141,15 @@ function parseAtom(tokens: string[], pos: number): [ASTNode, number] {
     throw new Error('Unexpected end of expression');
   }
   const token = tokens[pos];
-  if (token === '(') {
+  if (token === '{') {
     const [node, afterExpr] = parseExpr(tokens, pos + 1);
-    if (afterExpr >= tokens.length || tokens[afterExpr] !== ')') {
-      throw new Error('Missing closing parenthesis');
+    if (afterExpr >= tokens.length || tokens[afterExpr] !== '}') {
+      throw new Error('Missing closing brace }');
     }
     return [node, afterExpr + 1];
   }
-  if (token === ')') {
-    throw new Error(`Unexpected ')' at position ${pos}`);
+  if (token === '}') {
+    throw new Error(`Unexpected '}' at position ${pos}`);
   }
   if (token === '&' || token === '|') {
     throw new Error(`Unexpected operator '${token}' at position ${pos}`);
