@@ -103,6 +103,55 @@ function computeMismatch(row: Record<string, string>, terms: string[], modifierC
   return totalUnmatched;
 }
 
+// In-memory cache for parsed CSV data (avoids re-reading disk on every query)
+interface CachedData {
+  header: string[];
+  rows: Record<string, string>[];
+}
+
+let cacheVersion: string | null = null;
+let cacheData: CachedData | null = null;
+
+function getCachedRows(mcVersion: string, cacheDir: string): CachedData {
+  if (cacheVersion === mcVersion && cacheData !== null) {
+    return cacheData;
+  }
+
+  const cacheFile = path.join(cacheDir, `${mcVersion}.csv`);
+  const content = fs.readFileSync(cacheFile, 'utf-8');
+  const lines = content.split('\n').filter(line => line.trim().length > 0);
+
+  if (lines.length === 0) {
+    const empty: CachedData = { header: [], rows: [] };
+    cacheVersion = mcVersion;
+    cacheData = empty;
+    return empty;
+  }
+
+  const header = parseCsvLine(lines[0]);
+  const rows: Record<string, string>[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const fields = parseCsvLine(lines[i]);
+    const row: Record<string, string> = {};
+    for (let j = 0; j < header.length; j++) {
+      row[header[j]] = fields[j] ?? '';
+    }
+    rows.push(row);
+  }
+
+  const result: CachedData = { header, rows };
+  cacheVersion = mcVersion;
+  cacheData = result;
+  return result;
+}
+
+/** Invalidate cache (e.g., after rebuilding a version) */
+export function invalidateCache(): void {
+  cacheVersion = null;
+  cacheData = null;
+}
+
 export function validateCache(mcVersion: string, cacheDir: string = CACHE_DIR): boolean {
   const cacheFile = path.join(cacheDir, `${mcVersion}.csv`);
   const mappingInfoPath = path.join(cacheDir, 'mapping-info.json');
@@ -128,28 +177,20 @@ export function searchCache(
   limit: number = DEFAULT_LIMIT,
   cacheDir: string = CACHE_DIR
 ): SearchResult {
-  const cacheFile = path.join(cacheDir, `${mcVersion}.csv`);
-  const content = fs.readFileSync(cacheFile, 'utf-8');
-  const lines = content.split('\n').filter(line => line.trim().length > 0);
+  const { header, rows } = getCachedRows(mcVersion, cacheDir);
 
-  if (lines.length === 0) {
+  if (rows.length === 0) {
     return { total: 0, page, limit, totalPages: 0, results: [] };
   }
 
-  const header = parseCsvLine(lines[0]);
   const terms = extractTerms(astRoot);
   const scored: ScoredMappingEntry[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const fields = parseCsvLine(lines[i]);
-    const row: Record<string, string> = {};
-    for (let j = 0; j < header.length; j++) {
-      row[header[j]] = fields[j] ?? '';
-    }
-    const result = evaluateNode(astRoot, row, SEARCH_COLUMNS);
+  for (let i = 0; i < rows.length; i++) {
+    const result = evaluateNode(astRoot, rows[i], SEARCH_COLUMNS);
     if (result.matched) {
-      const mismatch = computeMismatch(row, terms, result.modifierColumns);
-      scored.push(rowToEntry(row, result.match, mismatch));
+      const mismatch = computeMismatch(rows[i], terms, result.modifierColumns);
+      scored.push(rowToEntry(rows[i], result.match, mismatch));
     }
   }
 
@@ -177,32 +218,24 @@ export function searchClasses(
   cacheDir: string = CACHE_DIR
 ): SearchResult {
   const classAst = forceClassModifier(astRoot);
-  const cacheFile = path.join(cacheDir, `${mcVersion}.csv`);
-  const content = fs.readFileSync(cacheFile, 'utf-8');
-  const lines = content.split('\n').filter(line => line.trim().length > 0);
+  const { rows } = getCachedRows(mcVersion, cacheDir);
 
-  if (lines.length === 0) {
+  if (rows.length === 0) {
     return { total: 0, page, limit, totalPages: 0, results: [] };
   }
 
-  const header = parseCsvLine(lines[0]);
   const terms = extractTerms(astRoot);
   const seen = new Set<string>();
   const scored: ScoredMappingEntry[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const fields = parseCsvLine(lines[i]);
-    const row: Record<string, string> = {};
-    for (let j = 0; j < header.length; j++) {
-      row[header[j]] = fields[j] ?? '';
-    }
-    const result = evaluateNode(classAst, row, SEARCH_COLUMNS);
+  for (let i = 0; i < rows.length; i++) {
+    const result = evaluateNode(classAst, rows[i], SEARCH_COLUMNS);
     if (result.matched) {
-      const classKey = `${row['obf_class']}\0${row['deobf_class']}`;
+      const classKey = `${rows[i]['obf_class']}\0${rows[i]['deobf_class']}`;
       if (!seen.has(classKey)) {
         seen.add(classKey);
-        const mismatch = computeMismatch(row, terms, result.modifierColumns);
-        scored.push(rowToEntry(row, result.match, mismatch));
+        const mismatch = computeMismatch(rows[i], terms, result.modifierColumns);
+        scored.push(rowToEntry(rows[i], result.match, mismatch));
       }
     }
   }

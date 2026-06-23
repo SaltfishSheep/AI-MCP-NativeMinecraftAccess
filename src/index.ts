@@ -19,6 +19,7 @@ import {
   validateCache,
   searchCache,
   searchClasses,
+  invalidateCache,
 } from './search/index.js';
 import { CACHE_DIR, DEFAULT_LIMIT } from './types.js';
 
@@ -170,6 +171,7 @@ Examples:
             ],
           };
         }
+        invalidateCache();
       }
 
       // Search
@@ -343,6 +345,7 @@ Examples:
             ],
           };
         }
+        invalidateCache();
       }
 
       // Search classes only
