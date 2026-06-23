@@ -1,54 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ScoredMappingEntry, SearchResult, CACHE_DIR, DEFAULT_LIMIT, SEARCH_COLUMNS, SIDE_MAP } from '../types.js';
 import { ASTNode, evaluateNode, extractTerms, forceClassModifier } from './expression.js';
-
-// Resolve package.json path relative to this source file (works from src/ or dist/)
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PACKAGE_JSON_PATH = path.resolve(__dirname, '..', '..', 'package.json');
-
-function getPackageVersion(): string {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8')) as Record<string, unknown>;
-    return (pkg['version'] as string) ?? 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        result.push(current);
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-  }
-  result.push(current);
-  return result;
-}
+import { getPackageVersion, parseCsvLine } from '../util.js';
 
 function rowToEntry(row: Record<string, string>, matchScore: number, mismatchScore: number): ScoredMappingEntry {
   const sideRaw = row['sideonly'] ?? '0';
@@ -253,10 +207,4 @@ export function searchClasses(
   const results = scored.slice(start, start + limit);
 
   return { total, page: clampedPage, limit, totalPages, results };
-}
-
-export function formatRow(row: Record<string, string>): string {
-  const desc = row['desc'] ?? '';
-  const descPart = desc ? `  desc=${desc}` : '';
-  return `[${row['type'] ?? '?'}] ${row['obf_class'] ?? ''}.${row['obf_name'] ?? ''} -> ${row['deobf_class'] ?? ''}.${row['deobf_name'] ?? ''}  srg=${row['srg_name'] ?? ''}${descPart}  sideonly=${row['sideonly'] ?? ''}`;
 }

@@ -10,7 +10,7 @@ Minecraft's Java code is obfuscated at runtime — class, method, and field name
 
 - **Search obfuscated ↔ deobfuscated mappings** across 38 Minecraft versions (1.7.10 – 1.20.1)
 - **Auto-build mapping caches** on first use — downloads from NeoForge Maven and Mojang servers
-- **Boolean expression search** — `Entity&Player`, `(Block|Item)&client`, `func_149645`
+- **Boolean expression search** — `Entity&Player`, `{Block|Item}&client`, `func_149645`
 
 ### Use Cases
 
@@ -118,7 +118,7 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 | Query | Description |
 |-------|-------------|
 | `Entity&Player` | Entries containing both "Entity" AND "Player" |
-| `(Block\|Item)&client` | Client-side Block or Item entries |
+| `{Block\|Item}&client` | Client-side Block or Item entries |
 | `func_70091_d` | Find a specific SRG method name by ID |
 | `KeyBinding` | All entries mentioning KeyBinding |
 | `m_91087_` | Find a TSRGv2 method (1.17+) |
@@ -172,7 +172,7 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 ```
 Found 382 results for "Entity&Player" in MC 1.12.2 (page 1/39)
 
-  1. [method] aed.cD -> net/minecraft/entity/player/EntityPlayer.getAbsorptionAmount  srg=func_110139_bj  desc=()F  sideonly=common
+  1. [method] aed.cD -> net/minecraft/entity/player/EntityPlayer.getAbsorptionAmount  srg=func_110139_bj  desc=()F  sideonly=common  match=2.0 mismatch=42
   2. [method] aed.bM -> net/minecraft/entity/player/EntityPlayer.applyEntityAttributes  srg=func_110147_ax  desc=()V  sideonly=common
   ...
 ```

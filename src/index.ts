@@ -103,7 +103,7 @@ Args:
         sideonly — common (non-side-specific) entries only
     - a&b: AND (both must match), higher precedence
     - a|b: OR (either must match)
-    - (expr): grouping with braces: {a|b}&c
+    - {expr}: grouping with braces: {a|b}&c
     - Examples: "Entity&Player", "Potion:class&Duration:name", "walk:method&static", "{Entity|Block}&client"
   page (number): Page number, 1-indexed (default: 1)
   limit (number): Results per page (default: 20, max: 100)
@@ -281,7 +281,7 @@ Args:
     - term: case-insensitive substring match (e.g. "Entity", "Potion")
     - a&b: AND (both must match), higher precedence
     - a|b: OR (either must match)
-    - (expr): grouping
+    - {expr}: grouping with braces
     - Examples: "Entity&Player", "Potion|Effect", "net/minecraft/entity"
   page (number): Page number, 1-indexed (default: 1)
   limit (number): Results per page (default: 20, max: 100)

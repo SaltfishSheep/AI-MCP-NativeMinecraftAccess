@@ -1,22 +1,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import type { MappingEntry, MappingInfo } from '../types.js';
 import { CACHE_DIR } from '../types.js';
-
-// Resolve package.json path relative to this source file (works from src/ or dist/)
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_JSON_PATH = resolve(__dirname, '..', '..', 'package.json');
-
-function getPackageVersion(): string {
-  try {
-    const pkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf-8')) as Record<string, unknown>;
-    return (pkg['version'] as string) ?? 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
+import { getPackageVersion } from '../util.js';
 
 // ============================================================================
 // CSV Helpers

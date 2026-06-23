@@ -1,4 +1,5 @@
 import { SIDE_MAP } from '../types.js';
+import { parseCsvLine } from '../util.js';
 
 // ============================================================================
 // SRG Parser (1.7.10 - 1.11.2)
@@ -488,45 +489,6 @@ export function parseMcpCsv(content: string): McpCsvEntry[] {
   }
 
   return entries;
-}
-
-/**
- * Parse a single CSV line, handling quoted fields.
- */
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          // Escaped quote
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        result.push(current);
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-  }
-  result.push(current);
-
-  return result;
 }
 
 // ============================================================================

@@ -173,10 +173,10 @@ function mergeCsvFieldsSrg(
  */
 function mergeCsvFieldsTsrg(
   csvFields: ReturnType<typeof parseMcpCsv>,
-  tsrgFields: Map<string, { obf_class: string; obf_name: string }>
+  tsrgFields: Map<string, { obf_class: string; obf_name: string; deobf_class: string }>
 ): MappingEntry[] {
   // Build SRG name lookup: srg_name -> { obf_class, tsrg_info }
-  const srgLookup = new Map<string, { obf_class: string; tsrg_info: { obf_class: string; obf_name: string } }>();
+  const srgLookup = new Map<string, { obf_class: string; tsrg_info: { obf_class: string; obf_name: string; deobf_class: string } }>();
   for (const [key, tsrg_info] of tsrgFields.entries()) {
     const [_obfClass, col2] = key.split('\0');
     if (col2.startsWith('field_')) {
@@ -185,7 +185,7 @@ function mergeCsvFieldsTsrg(
   }
 
   // Build Mojang name lookup: mojang_name -> { obf_class, tsrg_info }
-  const mojangLookup = new Map<string, { obf_class: string; tsrg_info: { obf_class: string; obf_name: string } }>();
+  const mojangLookup = new Map<string, { obf_class: string; tsrg_info: { obf_class: string; obf_name: string; deobf_class: string } }>();
   for (const [key, tsrg_info] of tsrgFields.entries()) {
     const [_obfClass, col2] = key.split('\0');
     if (!col2.startsWith('field_')) {
@@ -205,7 +205,7 @@ function mergeCsvFieldsTsrg(
     if (srgMatch) {
       entries.push({
         obf_class: srgMatch.tsrg_info.obf_class,
-        deobf_class: srgMatch.obf_class,
+        deobf_class: srgMatch.tsrg_info.deobf_class,
         type: 'field',
         obf_name: srgMatch.tsrg_info.obf_name,
         deobf_name: deobfName,
@@ -222,7 +222,7 @@ function mergeCsvFieldsTsrg(
     if (mojangMatch) {
       entries.push({
         obf_class: mojangMatch.tsrg_info.obf_class,
-        deobf_class: mojangMatch.obf_class,
+        deobf_class: mojangMatch.tsrg_info.deobf_class,
         type: 'field',
         obf_name: mojangMatch.tsrg_info.obf_name,
         deobf_name: deobfName,
