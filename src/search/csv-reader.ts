@@ -67,9 +67,10 @@ function rowToEntry(row: Record<string, string>, matchScore: number, mismatchSco
   };
 }
 
-function computeMismatch(row: Record<string, string>, terms: string[]): number {
+function computeMismatch(row: Record<string, string>, terms: string[], modifierColumns: readonly string[]): number {
   let mismatch = 0;
-  for (const col of SEARCH_COLUMNS) {
+  const columns = modifierColumns.length > 0 ? modifierColumns : SEARCH_COLUMNS;
+  for (const col of columns) {
     const value = (row[col] ?? '').toLowerCase();
     const matchedByAnyTerm = terms.some(term => value.includes(term));
     if (!matchedByAnyTerm) {
@@ -124,7 +125,7 @@ export function searchCache(
     }
     const result = evaluateNode(astRoot, row, SEARCH_COLUMNS);
     if (result.matched) {
-      const mismatch = computeMismatch(row, terms);
+      const mismatch = computeMismatch(row, terms, result.modifierColumns);
       scored.push(rowToEntry(row, result.match, mismatch));
     }
   }
@@ -177,7 +178,7 @@ export function searchClasses(
       const classKey = `${row['obf_class']}\0${row['deobf_class']}`;
       if (!seen.has(classKey)) {
         seen.add(classKey);
-        const mismatch = computeMismatch(row, terms);
+        const mismatch = computeMismatch(row, terms, result.modifierColumns);
         scored.push(rowToEntry(row, result.match, mismatch));
       }
     }

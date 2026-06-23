@@ -130,9 +130,23 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 | Operator | Meaning | Example |
 |----------|---------|---------|
 | `term` | Case-insensitive substring match | `KeyBinding` |
+| `term:modifier` | Restrict match scope or type | `Potion:class`, `walk:method`, `Z:desc` |
 | `&` | AND (both must match, higher precedence) | `Entity&Living` |
 | `\|` | OR (either must match) | `Entity\|Player` |
 | `()` | Grouping | `(a\|b)&c` |
+
+**Modifiers:**
+
+| Modifier | Effect | Example |
+|----------|--------|---------|
+| `all` | Search all columns (default) | `Entity:all` |
+| `class` | Search class names only | `Potion:class` |
+| `name` | Search field/method names (methods+fields only) | `Duration:name` |
+| `desc` | Search descriptor only | `()Z:desc` |
+| `method` | Methods only | `walk:method` |
+| `field` | Fields only | `health:field` |
+| `static` | Static entries only | `get:static` |
+| `sideonly` | Common (non-side-specific) entries only | `Entity:sideonly` |
 
 ## Supported Versions
 

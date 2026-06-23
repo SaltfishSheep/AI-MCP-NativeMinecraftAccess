@@ -130,9 +130,23 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 | 运算符 | 含义 | 示例 |
 |--------|------|------|
 | `term` | 大小写不敏感的子串匹配 | `KeyBinding` |
+| `term:modifier` | 限制匹配范围或类型 | `Potion:class`、`walk:method`、`Z:desc` |
 | `&` | 且（两者都必须匹配，优先级更高） | `Entity&Living` |
 | `\|` | 或（任一匹配即可） | `Entity\|Player` |
 | `()` | 分组 | `(a\|b)&c` |
+
+**修饰符：**
+
+| 修饰符 | 效果 | 示例 |
+|--------|------|------|
+| `all` | 搜索所有列（默认） | `Entity:all` |
+| `class` | 仅搜索类名 | `Potion:class` |
+| `name` | 搜索字段/方法名（仅方法+字段条目） | `Duration:name` |
+| `desc` | 仅搜索描述符 | `()Z:desc` |
+| `method` | 仅方法条目 | `walk:method` |
+| `field` | 仅字段条目 | `health:field` |
+| `static` | 仅静态条目 | `get:static` |
+| `sideonly` | 仅通用（非侧边特定）条目 | `Entity:sideonly` |
 
 ## 支持版本
 

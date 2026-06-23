@@ -82,18 +82,28 @@ The tool automatically builds the mapping cache on first use for a given MC vers
 internet access to download from NeoForge Maven and Mojang servers). Subsequent searches for
 the same version use the cached data.
 
-Search columns: obf_class, deobf_class, obf_name, deobf_name, srg_name.
+Search columns: obf_class, deobf_class, obf_name, deobf_name, srg_name, desc.
 
 Args:
   mc_version (string): Minecraft version (e.g. "1.12.2", "1.20.1")
   expression (string): Boolean search expression:
     - term: case-insensitive substring match (e.g. "Entity", "Player")
-    - term:modifier: restrict match scope (e.g. "Potion:class", "Duration:name")
-      Modifiers: class, name, method, field, desc
+    - term:modifier: restrict match scope and type filter
+      Column modifiers:
+        all (default) — search all columns
+        class — search obf_class, deobf_class only
+        name — search obf_name, deobf_name, srg_name (methods+fields only)
+        desc — search desc only
+      Type filter modifiers:
+        method — methods only, search all columns
+        field — fields only, search all columns
+      Property filter modifiers:
+        static — static entries only
+        sideonly — common (non-side-specific) entries only
     - a&b: AND (both must match), higher precedence
     - a|b: OR (either must match)
     - (expr): grouping
-    - Examples: "Entity&Player", "Potion:class&Duration:name", "(Entity|Block)&client"
+    - Examples: "Entity&Player", "Potion:class&Duration:name", "walk:method&static"
   page (number): Page number, 1-indexed (default: 1)
   limit (number): Results per page (default: 20, max: 100)
 
@@ -106,6 +116,7 @@ Returns:
 Examples:
   - search_native_mc("1.12.2", "Entity&Player") → entries with both "Entity" AND "Player"
   - search_native_mc("1.12.2", "Potion:class&Duration:name") → class has "Potion", name has "Duration"
+  - search_native_mc("1.12.2", "walk:method&static") → static methods with "walk"
   - search_native_mc("1.20.1", "(Block|Item)&client") → client-side Block or Item entries
   - search_native_mc("1.12.2", "func_149645") → find a specific SRG method name`,
     inputSchema: SearchInputSchema,

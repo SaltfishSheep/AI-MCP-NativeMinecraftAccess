@@ -4,7 +4,7 @@ export interface TermNode {
   type: 'term';
   term: string;           // lowercased, used for matching
   originalTerm: string;   // original case from user input, used for scoring
-  modifier?: 'class' | 'name' | 'method' | 'field' | 'desc';
+  modifier?: 'all' | 'class' | 'name' | 'method' | 'field' | 'desc' | 'static' | 'sideonly';
 }
 
 export interface AndNode {
@@ -27,15 +27,36 @@ export interface MatchResult {
   matched: boolean;
   /** Match score: sum of per-term match values (exact=1.0, case-insensitive=0.5) */
   match: number;
+  /** The set of columns that were in scope for this term (for mismatch computation) */
+  modifierColumns: readonly string[];
 }
 
-const VALID_MODIFIERS = new Set(['class', 'name', 'method', 'field', 'desc']);
+const VALID_MODIFIERS = new Set(['all', 'class', 'name', 'method', 'field', 'desc', 'static', 'sideonly']);
 
-// Column sets for modifiers
+// Column sets for modifiers — determines which columns are searched and scored
 const MODIFIER_COLUMNS: Record<string, readonly string[]> = {
-  class: ['obf_class', 'deobf_class'],
-  name: ['obf_name', 'deobf_name', 'srg_name'],
-  desc: ['desc'],
+  all:      ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
+  class:    ['obf_class', 'deobf_class'],
+  name:     ['obf_name', 'deobf_name', 'srg_name'],
+  method:   ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
+  field:    ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
+  desc:     ['desc'],
+  static:   ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
+  sideonly: ['obf_class', 'deobf_class', 'obf_name', 'deobf_name', 'srg_name', 'desc'],
+};
+
+// Type/property filters for modifiers
+// null = no filter, 'method' = methods only, 'field' = fields only,
+// 'method_or_field' = methods+fields, 'static' = static only, 'sideonly' = common only
+const MODIFIER_TYPE_FILTER: Record<string, string | null> = {
+  all:      null,
+  class:    null,
+  name:     'method_or_field',
+  method:   'method',
+  field:    'field',
+  desc:     null,
+  static:   'static',
+  sideonly: 'sideonly',
 };
 
 // Tokenizer: produces tokens '&', '|', '(', ')' , or a term string (potentially with :modifier)
@@ -163,31 +184,48 @@ export function evaluateNode(
 ): MatchResult {
   switch (node.type) {
     case 'term': {
-      // Determine which columns to search based on modifier
-      if (node.modifier === 'method') {
-        if (row['type'] !== 'method') return { matched: false, match: 0 };
-        return matchTermInColumns(node.term, node.originalTerm, row, searchColumns);
+      const modifier = node.modifier ?? 'all';
+
+      // Type/property filter
+      const typeFilter = MODIFIER_TYPE_FILTER[modifier];
+      if (typeFilter === 'method' && row['type'] !== 'method') {
+        return { matched: false, match: 0, modifierColumns: [] };
       }
-      if (node.modifier === 'field') {
-        if (row['type'] !== 'field') return { matched: false, match: 0 };
-        return matchTermInColumns(node.term, node.originalTerm, row, searchColumns);
+      if (typeFilter === 'field' && row['type'] !== 'field') {
+        return { matched: false, match: 0, modifierColumns: [] };
+      }
+      if (typeFilter === 'method_or_field' && row['type'] !== 'method' && row['type'] !== 'field') {
+        return { matched: false, match: 0, modifierColumns: [] };
+      }
+      if (typeFilter === 'static' && row['is_static'] !== 'true') {
+        return { matched: false, match: 0, modifierColumns: [] };
+      }
+      if (typeFilter === 'sideonly' && row['sideonly'] !== 'common') {
+        return { matched: false, match: 0, modifierColumns: [] };
       }
 
-      const columns = node.modifier ? (MODIFIER_COLUMNS[node.modifier] ?? searchColumns) : searchColumns;
+      // Column selection
+      const columns = MODIFIER_COLUMNS[modifier] ?? searchColumns;
       return matchTermInColumns(node.term, node.originalTerm, row, columns);
     }
     case 'and': {
       const left = evaluateNode(node.left, row, searchColumns);
-      if (!left.matched) return { matched: false, match: 0 };
+      if (!left.matched) return { matched: false, match: 0, modifierColumns: [] };
       const right = evaluateNode(node.right, row, searchColumns);
-      if (!right.matched) return { matched: false, match: 0 };
-      return { matched: true, match: left.match + right.match };
+      if (!right.matched) return { matched: false, match: 0, modifierColumns: [] };
+      return {
+        matched: true,
+        match: left.match + right.match,
+        modifierColumns: [...new Set([...left.modifierColumns, ...right.modifierColumns])],
+      };
     }
     case 'or': {
       const left = evaluateNode(node.left, row, searchColumns);
       const right = evaluateNode(node.right, row, searchColumns);
-      if (!left.matched && !right.matched) return { matched: false, match: 0 };
-      return { matched: true, match: Math.max(left.match, right.match) };
+      if (!left.matched && !right.matched) return { matched: false, match: 0, modifierColumns: [] };
+      if (left.matched && !right.matched) return left;
+      if (!left.matched && right.matched) return right;
+      return left.match >= right.match ? left : right;
     }
   }
 }
@@ -199,21 +237,23 @@ function matchTermInColumns(
   columns: readonly string[]
 ): MatchResult {
   let bestMatch = 0;
+  let bestCol = '';
   for (const col of columns) {
     const value = row[col] ?? '';
-    // Exact case match: value contains the original-case term
     if (value.includes(originalTerm)) {
-      return { matched: true, match: 1.0 };
+      return { matched: true, match: 1.0, modifierColumns: columns };
     }
-    // Case-insensitive match: value contains the lowercased term
     if (value.toLowerCase().includes(term)) {
-      bestMatch = Math.max(bestMatch, 0.5);
+      if (0.5 > bestMatch) {
+        bestMatch = 0.5;
+        bestCol = col;
+      }
     }
   }
   if (bestMatch > 0) {
-    return { matched: true, match: bestMatch };
+    return { matched: true, match: bestMatch, modifierColumns: columns };
   }
-  return { matched: false, match: 0 };
+  return { matched: false, match: 0, modifierColumns: [] };
 }
 
 /** Extract all leaf term strings from an AST node */
