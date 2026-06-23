@@ -2,7 +2,8 @@
 
 export interface TermNode {
   type: 'term';
-  term: string; // already lowercased
+  term: string;           // lowercased, used for matching
+  originalTerm: string;   // original case from user input, used for scoring
   modifier?: 'class' | 'name' | 'method' | 'field' | 'desc';
 }
 
@@ -72,14 +73,14 @@ function tokenize(expr: string): string[] {
         const termPart = term.substring(0, colonPos);
         const modifierPart = term.substring(colonPos + 1);
         if (termPart.length > 0 && modifierPart.length > 0 && VALID_MODIFIERS.has(modifierPart)) {
-          // Valid modifier: emit term:modifier
-          tokens.push(termPart.toLowerCase() + ':' + modifierPart);
+          // Valid modifier: emit termOriginal:termLower:modifier
+          tokens.push(termPart + ':' + termPart.toLowerCase() + ':' + modifierPart);
         } else {
-          // Invalid modifier: treat whole thing as term
-          tokens.push(term.toLowerCase());
+          // Invalid modifier: emit termOriginal:termLower
+          tokens.push(term + ':' + term.toLowerCase());
         }
       } else {
-        tokens.push(term.toLowerCase());
+        tokens.push(term + ':' + term.toLowerCase());
       }
     }
   }
@@ -133,13 +134,18 @@ function parseAtom(tokens: string[], pos: number): [ASTNode, number] {
     throw new Error(`Unexpected operator '${token}' at position ${pos}`);
   }
   // It's a term — check for modifier
-  const colonIdx = token.indexOf(':');
-  if (colonIdx >= 0) {
-    const term = token.substring(0, colonIdx);
-    const modifier = token.substring(colonIdx + 1) as TermNode['modifier'];
-    return [{ type: 'term', term, modifier }, pos + 1];
+  // Token format: "original:lower" or "original:lower:modifier"
+  const parts = token.split(':');
+  if (parts.length === 3) {
+    // original:lower:modifier
+    return [{ type: 'term', term: parts[1], originalTerm: parts[0], modifier: parts[2] as TermNode['modifier'] }, pos + 1];
   }
-  return [{ type: 'term', term: token }, pos + 1];
+  if (parts.length === 2) {
+    // original:lower
+    return [{ type: 'term', term: parts[1], originalTerm: parts[0] }, pos + 1];
+  }
+  // Fallback (shouldn't happen)
+  return [{ type: 'term', term: token.toLowerCase(), originalTerm: token }, pos + 1];
 }
 
 export function parseExpression(expr: string): ASTNode {
@@ -160,17 +166,15 @@ export function evaluateNode(
       // Determine which columns to search based on modifier
       if (node.modifier === 'method') {
         if (row['type'] !== 'method') return { matched: false, match: 0 };
-        // Type matches, now search all columns for the term
-        return matchTermInColumns(node.term, row, searchColumns);
+        return matchTermInColumns(node.term, node.originalTerm, row, searchColumns);
       }
       if (node.modifier === 'field') {
         if (row['type'] !== 'field') return { matched: false, match: 0 };
-        // Type matches, now search all columns for the term
-        return matchTermInColumns(node.term, row, searchColumns);
+        return matchTermInColumns(node.term, node.originalTerm, row, searchColumns);
       }
 
       const columns = node.modifier ? (MODIFIER_COLUMNS[node.modifier] ?? searchColumns) : searchColumns;
-      return matchTermInColumns(node.term, row, columns);
+      return matchTermInColumns(node.term, node.originalTerm, row, columns);
     }
     case 'and': {
       const left = evaluateNode(node.left, row, searchColumns);
@@ -190,17 +194,18 @@ export function evaluateNode(
 
 function matchTermInColumns(
   term: string,
+  originalTerm: string,
   row: Record<string, string>,
   columns: readonly string[]
 ): MatchResult {
   let bestMatch = 0;
   for (const col of columns) {
     const value = row[col] ?? '';
-    // Exact case match
-    if (value.includes(term)) {
+    // Exact case match: value contains the original-case term
+    if (value.includes(originalTerm)) {
       return { matched: true, match: 1.0 };
     }
-    // Case-insensitive match
+    // Case-insensitive match: value contains the lowercased term
     if (value.toLowerCase().includes(term)) {
       bestMatch = Math.max(bestMatch, 0.5);
     }
@@ -224,7 +229,7 @@ export function extractTerms(node: ASTNode): string[] {
 export function forceClassModifier(node: ASTNode): ASTNode {
   switch (node.type) {
     case 'term':
-      return { type: 'term', term: node.term, modifier: 'class' };
+      return { type: 'term', term: node.term, originalTerm: node.originalTerm, modifier: 'class' };
     case 'and':
       return { type: 'and', left: forceClassModifier(node.left), right: forceClassModifier(node.right) };
     case 'or':

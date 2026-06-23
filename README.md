@@ -24,11 +24,12 @@ Minecraft's Java code is obfuscated at runtime — class, method, and field name
 | **Scripting engines** | Resolve native Minecraft API names (CustomNPCs, CraftTweaker, etc.) |
 | **Porting mods** | Compare mappings between MC versions to find renamed APIs |
 
-### MCP Tool
+### MCP Tools
 
 | Tool | Description |
 |------|-------------|
 | `search_native_mc` | Search Minecraft obfuscated class/method/field name mappings |
+| `search_native_mc_class` | Search class names only (deduplicated, for quick discovery) |
 
 ## Quick Install (MCP Client)
 
