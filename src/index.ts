@@ -48,9 +48,9 @@ const SearchInputSchema = z.object({
     .min(1, 'Expression must not be empty')
     .describe(
       `Boolean search expression. ` +
-        `Syntax: term (case-insensitive substring), a&b (AND), a|b (OR), (expr) (grouping). ` +
+        `Syntax: term (case-insensitive substring), a&b (AND), a|b (OR), {expr} (grouping with braces). ` +
         `& has higher precedence than |. ` +
-        `Examples: "Entity&Player", "(Entity|Block)&client", "KeyBinding"`
+        `Examples: "Entity&Player", "{Entity|Block}&client", "KeyBinding"`
     ),
   page: z
     .number()
@@ -151,7 +151,7 @@ Examples:
           content: [
             {
               type: 'text' as const,
-              text: `Error: Invalid expression "${params.expression}": ${e instanceof Error ? e.message : String(e)}\nSyntax: term, a&b (AND), a|b (OR), (expr) (grouping)`,
+              text: `Error: Invalid expression "${params.expression}": ${e instanceof Error ? e.message : String(e)}\nSyntax: term, a&b (AND), a|b (OR), {expr} (grouping with braces)`,
             },
           ],
         };
@@ -325,7 +325,7 @@ Examples:
           content: [
             {
               type: 'text' as const,
-              text: `Error: Invalid expression "${params.expression}": ${e instanceof Error ? e.message : String(e)}\nSyntax: term, a&b (AND), a|b (OR), (expr) (grouping)`,
+              text: `Error: Invalid expression "${params.expression}": ${e instanceof Error ? e.message : String(e)}\nSyntax: term, a&b (AND), a|b (OR), {expr} (grouping with braces)`,
             },
           ],
         };
