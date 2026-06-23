@@ -19,7 +19,6 @@ import {
   validateCache,
   searchCache,
   searchClasses,
-  formatRow,
 } from './search/index.js';
 import { CACHE_DIR, DEFAULT_LIMIT } from './types.js';
 

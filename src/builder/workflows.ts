@@ -42,7 +42,7 @@ async function fetchMcpCsvPair(
  */
 function buildClassMap(
   methods: Map<string, { obf_class: string; deobf_class: string }>,
-  fields: Map<string, { obf_class: string; deobf_class?: string }>
+  fields: Map<string, { obf_class: string; deobf_class: string }>
 ): Map<string, string> {
   const classMap = new Map<string, string>();
 
@@ -56,8 +56,9 @@ function buildClassMap(
     if (info.obf_class) {
       if (key.includes('\0')) {
         // TSRGv1 fields: key = `${obf_class}\0${mojang_name}`
-        const obfClass = key.split('\0')[0];
-        classMap.set(info.obf_class, obfClass);
+        if (info.deobf_class) {
+          classMap.set(info.obf_class, info.deobf_class);
+        }
       } else if (info.deobf_class) {
         // SRG fields: key = srg_name
         classMap.set(info.obf_class, info.deobf_class);
@@ -257,8 +258,14 @@ function addConstructorEntries(
   constructors: { srg_id: string; class_path: string; descriptor: string }[],
   classMap: Map<string, string>
 ): MappingEntry[] {
+  // Build reverse map: deobf → obf
+  const reverseMap = new Map<string, string>();
+  for (const [obf, deobf] of classMap.entries()) {
+    reverseMap.set(deobf, obf);
+  }
+
   return constructors.map((ctor) => ({
-    obf_class: classMap.get(ctor.class_path) ?? '',
+    obf_class: reverseMap.get(ctor.class_path) ?? '',
     deobf_class: ctor.class_path,
     type: 'method' as const,
     obf_name: '<init>',

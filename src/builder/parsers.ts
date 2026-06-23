@@ -144,6 +144,7 @@ interface Tsrgv1MethodInfo {
 interface Tsrgv1FieldInfo {
   obf_class: string;
   obf_name: string;
+  deobf_class: string;
 }
 
 export interface Tsrgv1ParseResult {
@@ -217,7 +218,7 @@ export function parseTsrgv1(content: string): Tsrgv1ParseResult {
           const mojangName = parts[1];
           if (currentObfClass) {
             const key = `${currentObfClass}\0${mojangName}`;
-            fields.set(key, { obf_class: currentObfClass, obf_name: obfName });
+            fields.set(key, { obf_class: currentObfClass, obf_name: obfName, deobf_class: currentDeobfClass ?? '' });
           }
         }
       }

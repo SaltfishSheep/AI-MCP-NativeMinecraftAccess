@@ -18,7 +18,36 @@ function getPackageVersion(): string {
 }
 
 function parseCsvLine(line: string): string[] {
-  return line.split(',').map(field => field.trim());
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        result.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+  }
+  result.push(current);
+  return result;
 }
 
 function rowToEntry(row: Record<string, string>, matchScore: number, mismatchScore: number): ScoredMappingEntry {

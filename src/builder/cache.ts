@@ -127,33 +127,3 @@ export function updateMappingInfo(mcVersion: string, cacheDir: string = CACHE_DI
 
   writeFileSync(mappingInfoPath, JSON.stringify(mappingInfo, null, '\t') + '\n', 'utf-8');
 }
-
-// ============================================================================
-// Cache Validation
-// ============================================================================
-
-/**
- * Validate that the mapping cache exists and is valid.
- *
- * Checks:
- * 1. .mapping-caches/<version>.csv exists
- * 2. .mapping-caches/mapping-info.json exists
- * 3. mapping-info.json[version] matches package.json's version
- */
-export function validateCache(mcVersion: string, cacheDir: string = CACHE_DIR): boolean {
-  const cacheFile = join(cacheDir, `${mcVersion}.csv`);
-  const mappingInfoPath = join(cacheDir, 'mapping-info.json');
-
-  if (!existsSync(cacheFile)) return false;
-  if (!existsSync(mappingInfoPath)) return false;
-
-  try {
-    const expectedVersion = getPackageVersion();
-    const mappingInfo = JSON.parse(readFileSync(mappingInfoPath, 'utf-8')) as MappingInfo;
-    const actualVersion = mappingInfo[mcVersion] ?? '';
-
-    return actualVersion === expectedVersion;
-  } catch {
-    return false;
-  }
-}
