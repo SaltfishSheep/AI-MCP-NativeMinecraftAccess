@@ -118,7 +118,7 @@ Examples:
   - search_native_mc("1.12.2", "Entity&Player") → entries with both "Entity" AND "Player"
   - search_native_mc("1.12.2", "Potion:class&Duration:name") → class has "Potion", name has "Duration"
   - search_native_mc("1.12.2", "walk:method&static") → static methods with "walk"
-  - search_native_mc("1.20.1", "(Block|Item)&client") → client-side Block or Item entries
+  - search_native_mc("1.20.1", "{Block|Item}&client") → client-side Block or Item entries
   - search_native_mc("1.12.2", "func_149645") → find a specific SRG method name`,
     inputSchema: SearchInputSchema,
     annotations: {

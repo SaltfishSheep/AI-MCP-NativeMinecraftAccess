@@ -1,4 +1,4 @@
-import { SIDE_MAP } from '../types.js';
+import type { MappingEntry } from '../types.js';
 import { parseCsvLine } from '../util.js';
 
 // ============================================================================

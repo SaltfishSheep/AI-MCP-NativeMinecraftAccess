@@ -173,7 +173,7 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 Found 382 results for "Entity&Player" in MC 1.12.2 (page 1/39)
 
   1. [method] aed.cD -> net/minecraft/entity/player/EntityPlayer.getAbsorptionAmount  srg=func_110139_bj  desc=()F  sideonly=common  match=2.0 mismatch=42
-  2. [method] aed.bM -> net/minecraft/entity/player/EntityPlayer.applyEntityAttributes  srg=func_110147_ax  desc=()V  sideonly=common
+  2. [method] aed.bM -> net/minecraft/entity/player/EntityPlayer.applyEntityAttributes  srg=func_110147_ax  desc=()V  sideonly=common  match=2.0 mismatch=42
   ...
 ```
 
@@ -186,6 +186,7 @@ AI-MCP-NativeMinecraftMapping/
 ├── src/
 │   ├── index.ts              # MCP 服务器入口
 │   ├── types.ts              # TypeScript 类型定义
+│   ├── util.ts               # 共享工具（CSV 解析、package 版本读取）
 │   ├── version-table.ts      # 38 个 MC 版本的 URL 映射表
 │   ├── builder/
 │   │   ├── index.ts          # buildMappingCache 入口
@@ -195,7 +196,7 @@ AI-MCP-NativeMinecraftMapping/
 │   │   └── cache.ts          # CSV 缓存写入 + 验证
 │   └── search/
 │       ├── index.ts          # 重导出
-│       ├── expression.ts     # 布尔表达式解析器（AND/OR/括号）
+│       ├── expression.ts     # 布尔表达式解析器（AND/OR/花括号）
 │       └── csv-reader.ts     # CSV 读取 + 分页搜索
 ├── dist/                     # 构建输出（入口：dist/index.js）
 └── .mapping-caches/          # 生成的缓存文件（已 gitignore）

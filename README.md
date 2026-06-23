@@ -173,7 +173,7 @@ search_native_mc(mc_version="1.12.2", expression="Entity&Player")
 Found 382 results for "Entity&Player" in MC 1.12.2 (page 1/39)
 
   1. [method] aed.cD -> net/minecraft/entity/player/EntityPlayer.getAbsorptionAmount  srg=func_110139_bj  desc=()F  sideonly=common  match=2.0 mismatch=42
-  2. [method] aed.bM -> net/minecraft/entity/player/EntityPlayer.applyEntityAttributes  srg=func_110147_ax  desc=()V  sideonly=common
+  2. [method] aed.bM -> net/minecraft/entity/player/EntityPlayer.applyEntityAttributes  srg=func_110147_ax  desc=()V  sideonly=common  match=2.0 mismatch=42
   ...
 ```
 
@@ -186,6 +186,7 @@ AI-MCP-NativeMinecraftMapping/
 ├── src/
 │   ├── index.ts              # MCP server entry point
 │   ├── types.ts              # TypeScript type definitions
+│   ├── util.ts               # Shared utilities (CSV parsing, package version)
 │   ├── version-table.ts      # URL mapping table for 38 MC versions
 │   ├── builder/
 │   │   ├── index.ts          # buildMappingCache entry point
@@ -195,7 +196,7 @@ AI-MCP-NativeMinecraftMapping/
 │   │   └── cache.ts          # CSV cache writer + validator
 │   └── search/
 │       ├── index.ts          # Re-exports
-│       ├── expression.ts     # Boolean expression parser (AND/OR/parentheses)
+│       ├── expression.ts     # Boolean expression parser (AND/OR/braces)
 │       └── csv-reader.ts     # CSV reader + paginated search
 ├── dist/                     # Built JavaScript (entry: dist/index.js)
 └── .mapping-caches/          # Generated cache files (gitignored)
