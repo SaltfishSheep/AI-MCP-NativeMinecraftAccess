@@ -20,7 +20,9 @@ import {
   searchCacheAll,
   invalidateCache,
 } from './search/index.js';
-import { CACHE_DIR, DEFAULT_LIMIT, ScoredMappingEntry } from './types.js';
+import { DEFAULT_LIMIT, ScoredMappingEntry } from './types.js';
+import { CACHE_DIR } from './util.js';
+import { getPackageVersion } from './util.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -29,9 +31,16 @@ const SUPPORTED_VERSIONS = Object.keys(VERSION_TABLE).sort();
 const DEFAULT_OUTPUT =
   '[%type%] %obf_class%/%obf_name% -> %deobf_class% %deobf_name% %srg_name% %obf_desc% %deobf_desc% %access% %is_static% %sideonly%';
 
+/** Template variable names — keep in sync with ScoredMappingEntry fields */
+const TEMPLATE_KEYS = [
+  'type', 'obf_class', 'deobf_class', 'obf_name', 'deobf_name',
+  'srg_name', 'obf_desc', 'deobf_desc', 'access', 'is_static',
+  'sideonly', 'match', 'mismatch'
+] as const;
+
 // ── Output formatting ────────────────────────────────────────────────────────
 
-/** Map a ScoredMappingEntry to a template variable dictionary. */
+/** Map a ScoredMappingEntry to a template variable dictionary. Keep in sync with TEMPLATE_KEYS. */
 function entryVars(entry: ScoredMappingEntry): Record<string, string> {
   return {
     type: entry.type,
@@ -57,16 +66,9 @@ function entryVars(entry: ScoredMappingEntry): Record<string, string> {
  */
 function formatEntry(entry: ScoredMappingEntry, template: string): string {
   const vars = entryVars(entry);
-  // Build a case-insensitive lookup map
-  const lowerMap = new Map<string, string>();
-  for (const [k, v] of Object.entries(vars)) {
-    lowerMap.set(k.toLowerCase(), v);
-  }
-
   const result = template.replace(/%([^%]+)%/gi, (_match, key: string) => {
-    return lowerMap.get(key.toLowerCase()) ?? '';
+    return vars[key.toLowerCase()] ?? '';
   });
-
   // Collapse consecutive 2+ spaces into a single space, then trim
   return result.replace(/ {2,}/g, ' ').trim();
 }
@@ -83,7 +85,7 @@ function formatHeader(template: string): string {
 
 const server = new McpServer({
   name: 'native-mc-access-mcp-server',
-  version: '1.0.0',
+  version: getPackageVersion(),
 });
 
 // ── Tool: search ─────────────────────────────────────────────────────────────
@@ -147,7 +149,7 @@ expression syntax:
   Cross-version tip: "Player&Entity" works better than "EntityPlayer".
 
 Modifiers:
-  all (default) — all columns
+  all (default) — all columns (excludes sideonly)
   class — obf_class, deobf_class (full path)
   classname — class name after last '/'
   package — package before last '/'
@@ -155,7 +157,7 @@ Modifiers:
   method — same columns, methods only
   field — same columns, fields only
   desc — obf_desc, deobf_desc
-  modifier — access, is_static
+  modifier — is_static (access is always empty, data sources lack access info)
   side — sideonly (common/server/client)
 
 Scoring: exact case hit = 1.0, case-insensitive = 0.5, then by mismatch (less unmatched chars ranks higher).
@@ -208,7 +210,7 @@ Common patterns:
       // Auto-build cache if missing or invalid
       if (!validateCache(params.mc_version)) {
         console.error(`[native-mc-access] Cache missing for MC ${params.mc_version}, building...`);
-        await buildMappingCache(params.mc_version, CACHE_DIR, false);
+        await buildMappingCache(params.mc_version, CACHE_DIR, true);
         if (!validateCache(params.mc_version)) {
           return {
             content: [
@@ -236,16 +238,15 @@ Common patterns:
         };
       }
 
-      // Format each entry with the output template
-      const formatted = allResults.map((entry) => formatEntry(entry, params.output));
-
-      // Deduplicate identical formatted strings (preserving first occurrence order)
+      // Merge formatting + deduplication in a single pass
       const seen = new Set<string>();
       const deduplicated: { formatted: string; entry: ScoredMappingEntry }[] = [];
-      for (let i = 0; i < formatted.length; i++) {
-        if (!seen.has(formatted[i])) {
-          seen.add(formatted[i]);
-          deduplicated.push({ formatted: formatted[i], entry: allResults[i] });
+
+      for (const entry of allResults) {
+        const f = formatEntry(entry, params.output);
+        if (!seen.has(f)) {
+          seen.add(f);
+          deduplicated.push({ formatted: f, entry });
         }
       }
 

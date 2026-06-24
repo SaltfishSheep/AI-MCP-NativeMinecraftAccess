@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { VERSION_TABLE } from '../version-table.js';
 import { buildLegacySrg, buildLegacy, buildLegacyProguard, buildModern } from './workflows.js';
 import { writeCache } from './cache.js';
-import { CACHE_DIR } from '../types.js';
+import { CACHE_DIR } from '../util.js';
 
 /**
  * Build mapping cache for a given MC version.
@@ -29,9 +29,7 @@ export async function buildMappingCache(
   // Check if version is supported
   const versionConfig = VERSION_TABLE[mcVersion];
   if (!versionConfig) {
-    console.error(`[ERROR] MC version ${mcVersion} is not supported.`);
-    console.error(`Supported versions: ${Object.keys(VERSION_TABLE).sort().join(', ')}`);
-    return;
+    throw new Error(`MC version ${mcVersion} is not supported. Supported versions: ${Object.keys(VERSION_TABLE).sort().join(', ')}`);
   }
 
   const workflow = versionConfig.workflow;
@@ -50,9 +48,10 @@ export async function buildMappingCache(
     case 'modern':
       entries = await buildModern(mcVersion, versionConfig);
       break;
-    default:
-      console.error(`[ERROR] Unknown workflow: ${workflow as string}`);
-      return;
+    default: {
+      const _exhaustive: never = workflow;
+      throw new Error(`Unknown workflow: ${_exhaustive}`);
+    }
   }
 
   writeCache(entries, mcVersion, resolvedCacheDir);

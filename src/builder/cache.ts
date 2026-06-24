@@ -2,8 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkS
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { MappingEntry, MappingInfo } from '../types.js';
-import { CACHE_DIR } from '../types.js';
-import { getPackageVersion } from '../util.js';
+import { getPackageVersion, CACHE_DIR } from '../util.js';
 
 // ============================================================================
 // CSV Helpers
@@ -13,7 +12,7 @@ import { getPackageVersion } from '../util.js';
  * Escape a value for CSV output (wrap in quotes if it contains commas, quotes, or newlines).
  */
 function csvEscape(value: string): string {
-  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+  if (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
@@ -65,6 +64,10 @@ export function writeCache(entries: MappingEntry[], mcVersion: string, cacheDir:
 
   try {
     writeFileSync(tmpPath, entriesToCsv(entries), 'utf-8');
+    // Remove existing target before rename (Windows renameSync fails if target exists)
+    if (existsSync(cachePath)) {
+      unlinkSync(cachePath);
+    }
     renameSync(tmpPath, cachePath);
   } catch (err) {
     // Clean up temp file on failure

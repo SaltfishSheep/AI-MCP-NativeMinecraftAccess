@@ -112,6 +112,18 @@ npm run build
 search(mc_version="1.12.2", expression="Entity&Player")
 ```
 
+### 工具参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `mc_version` | string | 是 | - | Minecraft 版本（如 "1.12.2"、"1.20.1"） |
+| `expression` | string | 是 | - | 布尔搜索表达式 |
+| `page` | number | 否 | 1 | 页码（从 1 开始） |
+| `limit` | number | 否 | 20 | 每页结果数（最大 100） |
+| `output` | string | 否 | 默认模板 | 输出格式模板，使用 `%variable%` 语法 |
+
+**输出模板变量：** `%type%`、`%obf_class%`、`%deobf_class%`、`%obf_name%`、`%deobf_name%`、`%srg_name%`、`%obf_desc%`、`%deobf_desc%`、`%access%`、`%is_static%`、`%sideonly%`、`%match%`、`%mismatch%`
+
 **查询示例：**
 
 | 查询 | 描述 |
@@ -119,10 +131,11 @@ search(mc_version="1.12.2", expression="Entity&Player")
 | `Entity&Player` | 包含 "Entity" 和 "Player" 的条目 |
 | `Entity::classname` | 类名恰好为 "Entity" |
 | `walk:method` | 名称含 "walk" 的方法 |
-| `static::modifier` | is_static 或 access 恰好为 "static" |
+| `static::modifier` | is_static 恰好为 "static" |
 | `Potion:classname&Duration:name` | 类名 "Potion"，名称 "Duration" |
 | `{Block\|Item}&client` | 客户端的 Block 或 Item 条目 |
 | `func_70091_d` | 通过 SRG ID 查找特定方法名 |
+| `KeyBinding` | 所有提及 KeyBinding 的条目 |
 | `output="%deobf_class%"` | 去重后的类列表 |
 
 **表达式语法：**
@@ -141,15 +154,15 @@ search(mc_version="1.12.2", expression="Entity&Player")
 
 | 修饰符 | 搜索范围 | 说明 |
 |--------|----------|------|
-| `all` | 所有列 | 默认——搜索全部 |
+| `all` | 所有列 | 默认——搜索所有文本列（不包括 sideonly） |
 | `class` | obf_class, deobf_class | 完整类路径（如 `net/minecraft/entity/Entity`） |
 | `classname` | deobf_class（最后一个 `/` 之后） | 仅类名（如 `net/minecraft/entity/Entity` 中的 `Entity`） |
 | `package` | deobf_class（最后一个 `/` 之前） | 仅包名（如 `net/minecraft/entity`） |
 | `name` | obf_name, deobf_name, srg_name | 字段/方法名（仅方法+字段条目） |
 | `method` | obf_name, deobf_name, srg_name | 仅方法名（筛选 type=method） |
 | `field` | obf_name, deobf_name, srg_name | 仅字段名（筛选 type=field） |
-| `desc` | obf_desc, deobf_desc | 方法描述符 |
-| `modifier` | access, is_static | 访问级别和静态状态 |
+| `desc` | obf_desc, deobf_desc | 方法/字段描述符 |
+| `modifier` | access, is_static | 访问级别和静态状态（注意：`access` 始终为空——数据源缺少访问权限信息） |
 | `side` | sideonly | 侧边筛选（common/server/client） |
 
 提示：使用 `Player&Entity` 而非 `PlayerEntity`，以获得最佳跨版本兼容性（不同版本命名风格不同）。
@@ -160,10 +173,10 @@ search(mc_version="1.12.2", expression="Entity&Player")
 
 | 工作流 | 版本 | 数据源 |
 |--------|------|--------|
-| Legacy SRG | 1.7.10, 1.8–1.11.2 | SRG ZIP + MCP Stable CSV |
-| Legacy TSRGv1 | 1.12.2–1.15.2 | TSRGv1 + MCP Stable CSV + static_methods + constructors |
-| Legacy ProGuard | 1.16.1–1.16.5 | TSRGv1 + Mojang ProGuard |
-| Modern | 1.17–1.20.1 | TSRGv2 + Mojang ProGuard |
+| Legacy SRG | 1.7.10, 1.8, 1.8.8–1.9.4, 1.10.2–1.11.2 | SRG ZIP + MCP Stable CSV + static_methods |
+| Legacy TSRGv1 | 1.12.2–1.14.4, 1.15–1.15.2 | TSRGv1 + MCP Stable CSV + static_methods + constructors |
+| Legacy ProGuard | 1.16.1–1.16.5 | TSRGv1 + Mojang ProGuard + static_methods |
+| Modern | 1.17–1.17.1, 1.18–1.18.2, 1.19–1.19.4, 1.20–1.20.1 | TSRGv2 + Mojang ProGuard |
 
 ## 工作原理
 
@@ -176,10 +189,11 @@ search(mc_version="1.12.2", expression="Entity&Player")
 ## 输出格式
 
 ```
+Format: [type] obf_class/obf_name -> deobf_class deobf_name srg_name obf_desc deobf_desc access is_static sideonly
 Found 382 results for "Entity&Player" in MC 1.12.2 (page 1/39)
 
-  1. [method] aed.cD -> net/minecraft/entity/player/EntityPlayer.getAbsorptionAmount  srg=func_110139_bj  desc=()F  sideonly=common  match=2.0 mismatch=42
-  2. [method] aed.bM -> net/minecraft/entity/player/EntityPlayer.applyEntityAttributes  srg=func_110147_ax  desc=()V  sideonly=common  match=2.0 mismatch=42
+  1. [method] aed/cD -> net/minecraft/entity/player/EntityPlayer.getAbsorptionAmount func_110139_bj ()F  non-static common
+  2. [method] aed/bM -> net/minecraft/entity/player/EntityPlayer.applyEntityAttributes func_110147_ax ()V  non-static common
   ...
 ```
 
@@ -199,11 +213,11 @@ AI-MCP-NativeMinecraftAccess/
 │   │   ├── download.ts       # HTTP 下载 + 最小 ZIP 读取器
 │   │   ├── parsers.ts        # SRG、TSRGv1、TSRGv2、ProGuard、CSV 解析器
 │   │   ├── workflows.ts      # 4 种合并工作流构建器
-│   │   └── cache.ts          # CSV 缓存写入 + 验证
+│   │   └── cache.ts          # CSV 缓存写入 + 映射信息更新
 │   └── search/
-│       ├── index.ts          # 重导出
+│       ├── index.ts          # 桶导出（统一导出）
 │       ├── expression.ts     # 布尔表达式解析器（AND/OR/花括号）
-│       └── csv-reader.ts     # CSV 读取 + 分页搜索
+│       └── csv-reader.ts     # CSV 读取 + 评分 + 内存缓存
 ├── dist/                     # 构建输出（入口：dist/index.js）
 └── .mapping-caches/          # 生成的缓存文件（已 gitignore）
 ```

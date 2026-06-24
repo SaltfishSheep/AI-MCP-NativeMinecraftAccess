@@ -15,6 +15,12 @@ import {
 // Shared Helpers for Merge Builders
 // ============================================================================
 
+/** Assert that a required URL is configured, throwing a clear error if not. */
+function requireUrl(url: string | null | undefined, name: string, workflow: string, mcVersion: string): string {
+  if (!url) throw new Error(`Workflow '${workflow}' for MC ${mcVersion} requires ${name} but it was not configured`);
+  return url;
+}
+
 /**
  * Check if a method is static by looking up its SRG name.
  */
@@ -60,6 +66,29 @@ function computeDeobfDesc(entries: MappingEntry[], classMap: Map<string, string>
       entry.deobf_desc = convertDescriptor(entry.obf_desc, classMap);
     }
   }
+}
+
+// ============================================================================
+// Entry Factory
+// ============================================================================
+
+/** Default MappingEntry — all string fields empty, type/enum fields at safe defaults. */
+const ENTRY_DEFAULTS: Omit<MappingEntry, 'type'> = {
+  obf_class: '',
+  deobf_class: '',
+  obf_name: '',
+  deobf_name: '',
+  srg_name: '',
+  access: '',
+  obf_desc: '',
+  deobf_desc: '',
+  is_static: 'non-static',
+  sideonly: 'common',
+};
+
+/** Create a MappingEntry with defaults for all unspecified fields. */
+function makeEntry(overrides: Partial<MappingEntry> & Pick<MappingEntry, 'type'>): MappingEntry {
+  return { ...ENTRY_DEFAULTS, ...overrides };
 }
 
 /**
@@ -110,6 +139,20 @@ function buildClassMap(
 }
 
 /**
+ * Build obf_class -> deobf_class lookup from already-merged MappingEntry array.
+ * Used when class names come from ProGuard (not raw parser output).
+ */
+function buildClassMapFromEntries(entries: MappingEntry[]): Map<string, string> {
+  const classMap = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.obf_class && entry.deobf_class) {
+      classMap.set(entry.obf_class, entry.deobf_class);
+    }
+  }
+  return classMap;
+}
+
+/**
  * Merge CSV method entries with SRG/TSRG method mappings.
  */
 function mergeCsvMethods(
@@ -122,37 +165,28 @@ function mergeCsvMethods(
   for (const csvMethod of csvMethods) {
     const srgName = csvMethod.searge;
     const deobfName = csvMethod.name;
-    const sideonly = (SIDE_MAP[csvMethod.side] ?? 'common') as MappingEntry['sideonly'];
+    const sideonly = SIDE_MAP[csvMethod.side] ?? 'common';
     const info = mappingMethods.get(srgName);
 
     if (info) {
-      entries.push({
+      entries.push(makeEntry({
+        type: 'method',
         obf_class: info.obf_class,
         deobf_class: info.deobf_class,
-        type: 'method',
         obf_name: info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        access: '',
         obf_desc: info.descriptor,
-        deobf_desc: '',
         is_static: checkStatic(srgName, staticMethods),
         sideonly,
-      });
+      }));
     } else {
-      entries.push({
-        obf_class: '',
-        deobf_class: '',
+      entries.push(makeEntry({
         type: 'method',
-        obf_name: '',
         deobf_name: deobfName,
         srg_name: srgName,
-        access: '',
-        obf_desc: '',
-        deobf_desc: '',
-        is_static: 'non-static',
         sideonly,
-      });
+      }));
     }
   }
 
@@ -171,37 +205,26 @@ function mergeCsvFieldsSrg(
   for (const csvField of csvFields) {
     const srgName = csvField.searge;
     const deobfName = csvField.name;
-    const sideonly = (SIDE_MAP[csvField.side] ?? 'common') as MappingEntry['sideonly'];
+    const sideonly = SIDE_MAP[csvField.side] ?? 'common';
     const info = srgFields.get(srgName);
 
     if (info) {
-      entries.push({
+      entries.push(makeEntry({
+        type: 'field',
         obf_class: info.obf_class,
         deobf_class: info.deobf_class,
-        type: 'field',
         obf_name: info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        access: '',
-        obf_desc: '',
-        deobf_desc: '',
-        is_static: 'non-static',
         sideonly,
-      });
+      }));
     } else {
-      entries.push({
-        obf_class: '',
-        deobf_class: '',
+      entries.push(makeEntry({
         type: 'field',
-        obf_name: '',
         deobf_name: deobfName,
         srg_name: srgName,
-        access: '',
-        obf_desc: '',
-        deobf_desc: '',
-        is_static: 'non-static',
         sideonly,
-      });
+      }));
     }
   }
 
@@ -223,20 +246,14 @@ function mergeCsvFieldsTsrg(
   csvFields: ReturnType<typeof parseMcpCsv>,
   tsrgFields: Map<string, { obf_class: string; obf_name: string; deobf_class: string }>
 ): MappingEntry[] {
-  // Build SRG name lookup: srg_name -> { obf_class, tsrg_info }
+  // Build SRG and Mojang name lookups in a single pass
   const srgLookup = new Map<string, { obf_class: string; tsrg_info: { obf_class: string; obf_name: string; deobf_class: string } }>();
+  const mojangLookup = new Map<string, { obf_class: string; tsrg_info: { obf_class: string; obf_name: string; deobf_class: string } }>();
   for (const [key, tsrg_info] of tsrgFields.entries()) {
     const [_obfClass, col2] = key.split('\0');
     if (col2.startsWith('field_')) {
       srgLookup.set(col2, { obf_class: _obfClass, tsrg_info });
-    }
-  }
-
-  // Build Mojang name lookup: mojang_name -> { obf_class, tsrg_info }
-  const mojangLookup = new Map<string, { obf_class: string; tsrg_info: { obf_class: string; obf_name: string; deobf_class: string } }>();
-  for (const [key, tsrg_info] of tsrgFields.entries()) {
-    const [_obfClass, col2] = key.split('\0');
-    if (!col2.startsWith('field_')) {
+    } else {
       mojangLookup.set(col2, { obf_class: _obfClass, tsrg_info });
     }
   }
@@ -246,60 +263,45 @@ function mergeCsvFieldsTsrg(
   for (const csvField of csvFields) {
     const srgName = csvField.searge;
     const deobfName = csvField.name;
-    const sideonly = (SIDE_MAP[csvField.side] ?? 'common') as MappingEntry['sideonly'];
+    const sideonly = SIDE_MAP[csvField.side] ?? 'common';
 
     // Try SRG name match first
     const srgMatch = srgLookup.get(srgName);
     if (srgMatch) {
-      entries.push({
+      entries.push(makeEntry({
+        type: 'field',
         obf_class: srgMatch.tsrg_info.obf_class,
         deobf_class: srgMatch.tsrg_info.deobf_class,
-        type: 'field',
         obf_name: srgMatch.tsrg_info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        access: '',
-        obf_desc: '',
-        deobf_desc: '',
-        is_static: 'non-static',
         sideonly,
-      });
+      }));
       continue;
     }
 
     // Try Mojang name match
     const mojangMatch = mojangLookup.get(deobfName);
     if (mojangMatch) {
-      entries.push({
+      entries.push(makeEntry({
+        type: 'field',
         obf_class: mojangMatch.tsrg_info.obf_class,
         deobf_class: mojangMatch.tsrg_info.deobf_class,
-        type: 'field',
         obf_name: mojangMatch.tsrg_info.obf_name,
         deobf_name: deobfName,
         srg_name: srgName,
-        access: '',
-        obf_desc: '',
-        deobf_desc: '',
-        is_static: 'non-static',
         sideonly,
-      });
+      }));
       continue;
     }
 
     // No match
-    entries.push({
-      obf_class: '',
-      deobf_class: '',
+    entries.push(makeEntry({
       type: 'field',
-      obf_name: '',
       deobf_name: deobfName,
       srg_name: srgName,
-      access: '',
-      obf_desc: '',
-      deobf_desc: '',
-      is_static: 'non-static',
       sideonly,
-    });
+    }));
   }
 
   return entries;
@@ -318,18 +320,14 @@ function addConstructorEntries(
     reverseMap.set(deobf, obf);
   }
 
-  return constructors.map((ctor) => ({
+  return constructors.map((ctor) => makeEntry({
+    type: 'method',
     obf_class: reverseMap.get(ctor.class_path) ?? '',
     deobf_class: ctor.class_path,
-    type: 'method' as const,
     obf_name: '<init>',
     deobf_name: '<init>',
     srg_name: '<init>',
-    access: '' as const,
     obf_desc: ctor.descriptor,
-    deobf_desc: '',
-    is_static: 'non-static',
-    sideonly: 'common' as const,
   }));
 }
 
@@ -348,7 +346,7 @@ export async function buildLegacySrg(mcVersion: string, config: VersionConfig): 
   // Step 1: Download and parse SRG
   console.error('');
   console.error('[1/3] Downloading SRG mappings...');
-  const srgZip = await fetchBytes(config.srg_url!);
+  const srgZip = await fetchBytes(requireUrl(config.srg_url, 'srg_url', 'legacy_srg', mcVersion));
   const srgContent = extractFromZip(srgZip, 'joined.srg');
   const staticContent = extractOptionalFromZip(srgZip, 'static_methods.txt', 'static_methods.txt');
 
@@ -357,7 +355,7 @@ export async function buildLegacySrg(mcVersion: string, config: VersionConfig): 
 
   // Step 2: Download and parse MCP CSV
   console.error('[2/3] Downloading MCP stable CSV...');
-  const { csvFields, csvMethods } = await fetchMcpCsvPair(config.mcp_stable_url!);
+  const { csvFields, csvMethods } = await fetchMcpCsvPair(requireUrl(config.mcp_stable_url, 'mcp_stable_url', 'legacy_srg', mcVersion));
 
   // Step 3: Merge
   console.error('[3/3] Merging data...');
@@ -385,7 +383,7 @@ export async function buildLegacy(mcVersion: string, config: VersionConfig): Pro
   // Step 1: Download and parse TSRG
   console.error('');
   console.error('[1/3] Downloading MCPConfig TSRG...');
-  const tsrgZip = await fetchBytes(config.tsrg_url!);
+  const tsrgZip = await fetchBytes(requireUrl(config.tsrg_url, 'tsrg_url', 'legacy', mcVersion));
   const tsrgContent = extractFromZip(tsrgZip, 'config/joined.tsrg');
   const staticContent = extractOptionalFromZip(tsrgZip, 'config/static_methods.txt', 'static_methods.txt');
   const ctorContent = extractOptionalFromZip(tsrgZip, 'config/constructors', 'constructors file');
@@ -396,7 +394,7 @@ export async function buildLegacy(mcVersion: string, config: VersionConfig): Pro
 
   // Step 2: Download and parse MCP CSV
   console.error('[2/3] Downloading MCP stable CSV...');
-  const { csvFields, csvMethods } = await fetchMcpCsvPair(config.mcp_stable_url!);
+  const { csvFields, csvMethods } = await fetchMcpCsvPair(requireUrl(config.mcp_stable_url, 'mcp_stable_url', 'legacy', mcVersion));
 
   // Step 3: Merge
   console.error('[3/3] Merging data...');
@@ -428,7 +426,7 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
   // Step 1: Download and parse TSRG
   console.error('');
   console.error('[1/3] Downloading MCPConfig TSRG...');
-  const tsrgZip = await fetchBytes(config.tsrg_url!);
+  const tsrgZip = await fetchBytes(requireUrl(config.tsrg_url, 'tsrg_url', 'legacy_proguard', mcVersion));
   const tsrgContent = extractFromZip(tsrgZip, 'config/joined.tsrg');
   const staticContent = extractOptionalFromZip(tsrgZip, 'config/static_methods.txt', 'static_methods.txt');
 
@@ -437,7 +435,7 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
 
   // Step 2: Download and parse ProGuard
   console.error('[2/3] Downloading Mojang ProGuard mappings...');
-  const proguardContent = await fetchText(config.proguard_url!);
+  const proguardContent = await fetchText(requireUrl(config.proguard_url, 'proguard_url', 'legacy_proguard', mcVersion));
   const proguardEntries = parseProguard(proguardContent);
 
   // Step 3: Merge
@@ -460,33 +458,27 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
     const proguardMatch = proguardMap.get(proguardKey);
 
     if (proguardMatch) {
-      entries.push({
+      entries.push(makeEntry({
+        type: 'method',
         obf_class: obfClass,
         deobf_class: proguardMatch.deobf_class,
-        type: 'method',
         obf_name: obfName,
         deobf_name: proguardMatch.deobf_name,
         srg_name: srgName,
-        access: '',
         obf_desc: tsrgInfo.descriptor,
-        deobf_desc: '',
         is_static: checkStatic(srgName, staticMethods),
-        sideonly: 'common',
-      });
+      }));
     } else {
-      entries.push({
+      entries.push(makeEntry({
+        type: 'method',
         obf_class: obfClass,
         deobf_class: tsrgInfo.deobf_class,
-        type: 'method',
         obf_name: obfName,
         deobf_name: srgName,
         srg_name: srgName,
-        access: '',
         obf_desc: tsrgInfo.descriptor,
-        deobf_desc: '',
         is_static: checkStatic(srgName, staticMethods),
-        sideonly: 'common',
-      });
+      }));
     }
   }
 
@@ -500,42 +492,26 @@ export async function buildLegacyProguard(mcVersion: string, config: VersionConf
     const srgName = col2.startsWith('field_') ? col2 : '';
 
     if (proguardMatch) {
-      entries.push({
+      entries.push(makeEntry({
+        type: 'field',
         obf_class: obfClass,
         deobf_class: proguardMatch.deobf_class,
-        type: 'field',
         obf_name: obfName,
         deobf_name: proguardMatch.deobf_name,
         srg_name: srgName,
-        access: '',
-        obf_desc: '',
-        deobf_desc: '',
-        is_static: 'non-static',
-        sideonly: 'common',
-      });
+      }));
     } else {
-      entries.push({
-        obf_class: obfClass,
-        deobf_class: obfClass,
+      entries.push(makeEntry({
         type: 'field',
+        obf_class: obfClass,
         obf_name: obfName,
         deobf_name: col2,
         srg_name: srgName,
-        access: '',
-        obf_desc: '',
-        deobf_desc: '',
-        is_static: 'non-static',
-        sideonly: 'common',
-      });
+      }));
     }
   }
 
-  const classMap = new Map<string, string>();
-  for (const entry of entries) {
-    if (entry.obf_class && entry.deobf_class) {
-      classMap.set(entry.obf_class, entry.deobf_class);
-    }
-  }
+  const classMap = buildClassMapFromEntries(entries);
   computeDeobfDesc(entries, classMap);
 
   return entries;
@@ -556,12 +532,12 @@ export async function buildModern(mcVersion: string, config: VersionConfig): Pro
   // Step 1: Download and parse TSRG
   console.error('');
   console.error('[1/3] Downloading MCPConfig TSRG...');
-  const tsrgZip = await fetchBytes(config.tsrg_url!);
+  const tsrgZip = await fetchBytes(requireUrl(config.tsrg_url, 'tsrg_url', 'modern', mcVersion));
   const tsrgContent = extractFromZip(tsrgZip, 'config/joined.tsrg');
 
   // Step 2: Download and parse ProGuard
   console.error('[2/3] Downloading Mojang ProGuard mappings...');
-  const proguardContent = await fetchText(config.proguard_url!);
+  const proguardContent = await fetchText(requireUrl(config.proguard_url, 'proguard_url', 'modern', mcVersion));
 
   const tsrgEntries = parseTsrgv2(tsrgContent);
   const proguardEntries = parseProguard(proguardContent);
@@ -589,61 +565,43 @@ export async function buildModern(mcVersion: string, config: VersionConfig): Pro
     const proguardMatch = proguardMap.get(tsrgKey);
 
     if (proguardMatch) {
-      entries.push({
+      entries.push(makeEntry({
+        type: tsrgEntry.type,
         obf_class: tsrgEntry.obf_class,
         deobf_class: proguardMatch.deobf_class,
-        type: tsrgEntry.type,
         obf_name: tsrgEntry.obf_name,
         deobf_name: proguardMatch.deobf_name,
         srg_name: tsrgEntry.srg_name,
-        access: '',
         obf_desc: tsrgEntry.descriptor,
-        deobf_desc: '',
         is_static: tsrgEntry.is_static,
-        sideonly: 'common',
-      });
+      }));
     } else {
-      entries.push({
-        obf_class: tsrgEntry.obf_class,
-        deobf_class: '',
+      entries.push(makeEntry({
         type: tsrgEntry.type,
+        obf_class: tsrgEntry.obf_class,
         obf_name: tsrgEntry.obf_name,
-        deobf_name: '',
         srg_name: tsrgEntry.srg_name,
-        access: '',
         obf_desc: tsrgEntry.descriptor,
-        deobf_desc: '',
         is_static: tsrgEntry.is_static,
-        sideonly: 'common',
-      });
+      }));
     }
   }
 
   // Add ProGuard entries that have no TSRG match
   for (const [proguardKey, proguardEntry] of proguardMap.entries()) {
     if (!tsrgMap.has(proguardKey)) {
-      entries.push({
+      entries.push(makeEntry({
+        type: proguardEntry.type,
         obf_class: proguardEntry.obf_class,
         deobf_class: proguardEntry.deobf_class,
-        type: proguardEntry.type,
         obf_name: proguardEntry.obf_name,
         deobf_name: proguardEntry.deobf_name,
-        srg_name: '',
-        access: '',
         obf_desc: proguardEntry.descriptor,
-        deobf_desc: '',
-        is_static: 'non-static',
-        sideonly: 'common',
-      });
+      }));
     }
   }
 
-  const classMap = new Map<string, string>();
-  for (const entry of entries) {
-    if (entry.obf_class && entry.deobf_class) {
-      classMap.set(entry.obf_class, entry.deobf_class);
-    }
-  }
+  const classMap = buildClassMapFromEntries(entries);
   computeDeobfDesc(entries, classMap);
 
   return entries;

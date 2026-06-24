@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import { inflateRawSync } from 'node:zlib';
 import https from 'node:https';
 import http from 'node:http';
@@ -7,12 +6,18 @@ import http from 'node:http';
 // HTTP Fetch Helpers (using built-in https, no external dependencies)
 // ============================================================================
 
-function fetchUrl(url: string): Promise<Buffer> {
+function fetchUrl(url: string, maxRedirects: number = 5): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
     const req = client.get(url, { headers: { 'User-Agent': 'MinecraftMappingCacheBuilder/1.0' } }, (res) => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        fetchUrl(res.headers.location).then(resolve, reject);
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.statusCode !== 304 && res.headers.location) {
+        if (maxRedirects <= 0) {
+          reject(new Error(`Too many redirects fetching ${url}`));
+          return;
+        }
+        // Consume response body to free up the socket
+        res.resume();
+        fetchUrl(res.headers.location, maxRedirects - 1).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
@@ -32,19 +37,15 @@ function fetchUrl(url: string): Promise<Buffer> {
 export async function fetchBytes(url: string): Promise<Buffer> {
   console.error(`  Downloading: ${url}`);
   const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     try {
       return await fetchUrl(url);
     } catch (err) {
-      if (attempt < maxRetries) {
-        console.error(`  Retry ${attempt}/${maxRetries}...`);
-        await new Promise(r => setTimeout(r, 2000 * attempt));
-      } else {
-        throw err;
-      }
+      if (attempt >= maxRetries) throw err;
+      console.error(`  Retry ${attempt}/${maxRetries}...`);
+      await new Promise(r => setTimeout(r, 2000 * attempt));
     }
   }
-  throw new Error('Unreachable');
 }
 
 export async function fetchText(url: string): Promise<string> {
@@ -198,10 +199,13 @@ export function extractOptionalFromZip(
 ): string | null {
   try {
     return extractFromZip(zipBytes, path);
-  } catch {
-    if (label) {
-      console.error(`  Note: ${label} not found, skipping`);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('not found')) {
+      if (label) {
+        console.error(`  Note: ${label} not found, skipping`);
+      }
+      return null;
     }
-    return null;
+    throw err; // Re-throw unexpected errors (corrupt ZIP, etc.)
   }
 }

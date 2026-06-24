@@ -1,26 +1,41 @@
-import type { MappingEntry } from '../types.js';
 import { parseCsvLine } from '../util.js';
+
+// ============================================================================
+// Shared Helpers
+// ============================================================================
+
+/** Split string on first occurrence of separator. Returns [before, after] or ['', str] if not found. */
+function splitFirst(str: string, sep: string): [string, string] {
+  const idx = str.indexOf(sep);
+  return idx >= 0 ? [str.substring(0, idx), str.substring(idx + 1)] : ['', str];
+}
+
+/** Split string on last occurrence of separator. Returns [before, after] or [str, ''] if not found. */
+function splitLast(str: string, sep: string): [string, string] {
+  const idx = str.lastIndexOf(sep);
+  return idx >= 0 ? [str.substring(0, idx), str.substring(idx + 1)] : [str, ''];
+}
 
 // ============================================================================
 // SRG Parser (1.7.10 - 1.11.2)
 // ============================================================================
 
-interface SrgMethodInfo {
+interface MethodInfo {
   deobf_class: string;
   obf_class: string;
   obf_name: string;
   descriptor: string;
 }
 
-interface SrgFieldInfo {
+interface FieldInfo {
   obf_class: string;
   obf_name: string;
   deobf_class: string;
 }
 
 export interface SrgParseResult {
-  methods: Map<string, SrgMethodInfo>;
-  fields: Map<string, SrgFieldInfo>;
+  methods: Map<string, MethodInfo>;
+  fields: Map<string, FieldInfo>;
 }
 
 /**
@@ -37,8 +52,8 @@ export interface SrgParseResult {
  *   - fields: srg_name -> { obf_class, obf_name, deobf_class }
  */
 export function parseSrg(content: string): SrgParseResult {
-  const methods = new Map<string, SrgMethodInfo>();
-  const fields = new Map<string, SrgFieldInfo>();
+  const methods = new Map<string, MethodInfo>();
+  const fields = new Map<string, FieldInfo>();
 
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
@@ -60,27 +75,8 @@ export function parseSrg(content: string): SrgParseResult {
         const obfFull = parts[1];
         const deobfFull = parts[2];
 
-        let obfClass: string;
-        let obfField: string;
-        const obfSlash = obfFull.indexOf('/');
-        if (obfSlash !== -1) {
-          obfClass = obfFull.substring(0, obfSlash);
-          obfField = obfFull.substring(obfSlash + 1);
-        } else {
-          obfClass = '';
-          obfField = obfFull;
-        }
-
-        let deobfClass: string;
-        let srgName: string;
-        const deobfSlash = deobfFull.lastIndexOf('/');
-        if (deobfSlash !== -1) {
-          deobfClass = deobfFull.substring(0, deobfSlash);
-          srgName = deobfFull.substring(deobfSlash + 1);
-        } else {
-          deobfClass = '';
-          srgName = deobfFull;
-        }
+        const [obfClass, obfField] = splitFirst(obfFull, '/');
+        const [deobfClass, srgName] = splitLast(deobfFull, '/');
 
         fields.set(srgName, { obf_class: obfClass, obf_name: obfField, deobf_class: deobfClass });
       }
@@ -95,27 +91,8 @@ export function parseSrg(content: string): SrgParseResult {
         const deobfFull = parts[3];
         // parts[4] is srg_desc (same as obf_desc in practice)
 
-        let obfClass: string;
-        let obfMethod: string;
-        const obfSlash = obfFull.indexOf('/');
-        if (obfSlash !== -1) {
-          obfClass = obfFull.substring(0, obfSlash);
-          obfMethod = obfFull.substring(obfSlash + 1);
-        } else {
-          obfClass = '';
-          obfMethod = obfFull;
-        }
-
-        let deobfClass: string;
-        let srgName: string;
-        const deobfSlash = deobfFull.lastIndexOf('/');
-        if (deobfSlash !== -1) {
-          deobfClass = deobfFull.substring(0, deobfSlash);
-          srgName = deobfFull.substring(deobfSlash + 1);
-        } else {
-          deobfClass = '';
-          srgName = deobfFull;
-        }
+        const [obfClass, obfMethod] = splitFirst(obfFull, '/');
+        const [deobfClass, srgName] = splitLast(deobfFull, '/');
 
         methods.set(srgName, {
           deobf_class: deobfClass,
@@ -135,23 +112,10 @@ export function parseSrg(content: string): SrgParseResult {
 // TSRGv1 Parser (1.12.2 - 1.16.5)
 // ============================================================================
 
-interface Tsrgv1MethodInfo {
-  deobf_class: string;
-  obf_class: string;
-  obf_name: string;
-  descriptor: string;
-}
-
-interface Tsrgv1FieldInfo {
-  obf_class: string;
-  obf_name: string;
-  deobf_class: string;
-}
-
 export interface Tsrgv1ParseResult {
-  methods: Map<string, Tsrgv1MethodInfo>;
+  methods: Map<string, MethodInfo>;
   /** Keyed by `obf_class\0mojang_name` (since JS doesn't have tuple keys) */
-  fields: Map<string, Tsrgv1FieldInfo>;
+  fields: Map<string, FieldInfo>;
 }
 
 /**
@@ -162,8 +126,8 @@ export interface Tsrgv1ParseResult {
  *   - fields: `${obf_class}\0${mojang_name}` -> { obf_class, obf_name }
  */
 export function parseTsrgv1(content: string): Tsrgv1ParseResult {
-  const methods = new Map<string, Tsrgv1MethodInfo>();
-  const fields = new Map<string, Tsrgv1FieldInfo>();
+  const methods = new Map<string, MethodInfo>();
+  const fields = new Map<string, FieldInfo>();
 
   let currentObfClass: string | null = null;
   let currentDeobfClass: string | null = null;
@@ -173,7 +137,7 @@ export function parseTsrgv1(content: string): Tsrgv1ParseResult {
     if (!trimmed) continue;
 
     // Check indentation: indented lines are members
-    if (line.startsWith('\t') || line.startsWith('    ')) {
+    if (line !== line.trimStart()) {
       const parts = trimmed.split(/\s+/);
       if (parts.length === 0) continue;
 
@@ -203,10 +167,10 @@ export function parseTsrgv1(content: string): Tsrgv1ParseResult {
             }
           }
 
-          if (srgName) {
+          if (srgName && currentObfClass) {
             methods.set(srgName, {
               deobf_class: currentDeobfClass ?? '',
-              obf_class: currentObfClass ?? '',
+              obf_class: currentObfClass,
               obf_name: obfName,
               descriptor,
             });
@@ -265,8 +229,6 @@ export function parseTsrgv2(content: string): Tsrgv2Entry[] {
   const entries: Tsrgv2Entry[] = [];
 
   let currentObfClass: string | null = null;
-  // currentSrgClass is not used in entries but tracked for correctness
-  // let currentSrgClass: string | null = null;
 
   const lines = content.split('\n');
   let i = 0;
@@ -291,7 +253,6 @@ export function parseTsrgv2(content: string): Tsrgv2Entry[] {
       const parts = trimmed.split(/\s+/);
       if (parts.length >= 2) {
         currentObfClass = parts[0];
-        // currentSrgClass = parts[1];
       }
       continue;
     }
@@ -302,11 +263,11 @@ export function parseTsrgv2(content: string): Tsrgv2Entry[] {
     const parts = trimmed.split(/\s+/);
     if (parts.length === 0) continue;
 
-    // Check for static sub-line
+    // Check for static sub-line (must be at deeper indent than current member)
     let isStatic: 'static' | 'non-static' = 'non-static';
     if (i < lines.length) {
-      const nextLine = lines[i].trim();
-      if (nextLine === 'static') {
+      const nextIndent = lines[i].length - lines[i].trimStart().length;
+      if (nextIndent > indent && lines[i].trim() === 'static') {
         isStatic = 'static';
         i++;
       }
@@ -407,8 +368,7 @@ export function parseProguard(content: string): ProguardEntry[] {
         const parts = beforeParen.split(/\s+/);
         if (parts.length < 2) continue;
 
-        const _returnType = parts[0];
-        const methodName = parts[1];
+        const [, methodName] = parts;
 
         entries.push({
           deobf_class: currentDeobfClass ?? '',
@@ -422,8 +382,7 @@ export function parseProguard(content: string): ProguardEntry[] {
         // Field: type name -> obfName
         const parts = memberPart.split(/\s+/);
         if (parts.length >= 2) {
-          const _fieldType = parts[0];
-          const fieldName = parts[1];
+          const [, fieldName] = parts;
 
           entries.push({
             deobf_class: currentDeobfClass ?? '',

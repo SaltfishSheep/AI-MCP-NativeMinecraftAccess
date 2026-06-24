@@ -63,7 +63,12 @@ const MODIFIER_TYPE_FILTER: Record<string, string | null> = {
   side:      null,
 };
 
-// Tokenizer: produces tokens '&', '|', '{', '}' , or a term string (potentially with :modifier or ::modifier)
+// Internal separator for token encoding — must not appear in user input.
+// Using '\x00' (null byte) to avoid ambiguity with ':' which can appear in search terms.
+const SEP = '\x00';
+
+// Tokenizer: produces tokens '&', '|', '{', '}' , or a term string encoded as
+// "original\x00lowered" or "original\x00lowered\x00modifier" or "original\x00lowered\x00modifier\x00strong"
 function tokenize(expr: string): string[] {
   const tokens: string[] = [];
   let i = 0;
@@ -105,13 +110,13 @@ function tokenize(expr: string): string[] {
         const termPart = term.substring(0, separatorPos);
         const modifierPart = isStrong ? term.substring(separatorPos + 2) : term.substring(separatorPos + 1);
         if (termPart.length > 0 && modifierPart.length > 0 && VALID_MODIFIERS.has(modifierPart)) {
-          const suffix = isStrong ? ':strong' : '';
-          tokens.push(termPart + ':' + termPart.toLowerCase() + ':' + modifierPart + suffix);
+          const suffix = isStrong ? SEP + 'strong' : '';
+          tokens.push(termPart + SEP + termPart.toLowerCase() + SEP + modifierPart + suffix);
         } else {
-          tokens.push(term + ':' + term.toLowerCase());
+          tokens.push(term + SEP + term.toLowerCase());
         }
       } else {
-        tokens.push(term + ':' + term.toLowerCase());
+        tokens.push(term + SEP + term.toLowerCase());
       }
     }
   }
@@ -124,13 +129,16 @@ function tokenize(expr: string): string[] {
 //   and_expr = atom ('&' atom)*
 //   atom     = '{' or_expr '}' | term
 
-function parseExpr(tokens: string[], pos: number): [ASTNode, number] {
+function parseExpr(tokens: string[], pos: number, fromBrace?: boolean): [ASTNode, number] {
   let [left, newPos] = parseAnd(tokens, pos);
   while (newPos < tokens.length && tokens[newPos] === '|') {
     newPos++; // skip '|'
     const [right, afterRight] = parseAnd(tokens, newPos);
     left = { type: 'or', left, right };
     newPos = afterRight;
+  }
+  if (fromBrace && newPos >= tokens.length) {
+    throw new Error('Missing closing brace }');
   }
   return [left, newPos];
 }
@@ -152,7 +160,7 @@ function parseAtom(tokens: string[], pos: number): [ASTNode, number] {
   }
   const token = tokens[pos];
   if (token === '{') {
-    const [node, afterExpr] = parseExpr(tokens, pos + 1);
+    const [node, afterExpr] = parseExpr(tokens, pos + 1, true);
     if (afterExpr >= tokens.length || tokens[afterExpr] !== '}') {
       throw new Error('Missing closing brace }');
     }
@@ -165,8 +173,8 @@ function parseAtom(tokens: string[], pos: number): [ASTNode, number] {
     throw new Error(`Unexpected operator '${token}' at position ${pos}`);
   }
   // It's a term — check for modifier
-  // Token format: "original:lower" or "original:lower:modifier" or "original:lower:modifier:strong"
-  const parts = token.split(':');
+  // Token format: "original\x00lower" or "original\x00lower\x00modifier" or "original\x00lower\x00modifier\x00strong"
+  const parts = token.split(SEP);
   if (parts.length === 4 && parts[3] === 'strong') {
     return [{ type: 'term', term: parts[1], originalTerm: parts[0], modifier: parts[2] as TermNode['modifier'], strongModifier: true }, pos + 1];
   }
@@ -273,20 +281,8 @@ function matchTermInColumns(
   strongModifier?: boolean
 ): MatchResult {
   let bestMatch = 0;
-  let bestCol = '';
   for (const col of columns) {
-    let value: string;
-    if (col === '__classname__') {
-      const deobfClass = row['deobf_class'] ?? '';
-      const lastSlash = deobfClass.lastIndexOf('/');
-      value = lastSlash >= 0 ? deobfClass.substring(lastSlash + 1) : deobfClass;
-    } else if (col === '__package__') {
-      const deobfClass = row['deobf_class'] ?? '';
-      const lastSlash = deobfClass.lastIndexOf('/');
-      value = lastSlash >= 0 ? deobfClass.substring(0, lastSlash) : '';
-    } else {
-      value = row[col] ?? '';
-    }
+    const value = getColumnValue(row, col);
 
     if (strongModifier) {
       // Strong modifier: exact case-sensitive match required
@@ -294,14 +290,13 @@ function matchTermInColumns(
         return { matched: true, match: 1.0, modifierColumns: columns };
       }
     } else {
-      // Normal modifier: case-insensitive substring match
+      // Normal modifier: substring match (exact case = 1.0, case-insensitive = 0.5)
       if (value.includes(originalTerm)) {
         return { matched: true, match: 1.0, modifierColumns: columns };
       }
       if (value.toLowerCase().includes(term)) {
         if (0.5 > bestMatch) {
           bestMatch = 0.5;
-          bestCol = col;
         }
       }
     }
