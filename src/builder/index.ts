@@ -1,12 +1,23 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { VERSION_TABLE } from '../version-table.js';
-import { buildLegacySrg, buildLegacy, buildLegacyProguard, buildModern } from './workflows.js';
+import { buildLegacySrg, buildLegacy, buildLegacyProguard, buildModern, computeDeobfDesc, buildClassMapFromEntries } from './workflows.js';
 import { writeCache } from './cache.js';
 import { CACHE_DIR } from '../util.js';
+import { analyzeJars, enrichAndFilterEntries, cleanupJarCache } from './jar-analyzer.js';
+import type { MappingEntry } from '../types.js';
 
 /**
  * Build mapping cache for a given MC version.
+ *
+ * Workflow:
+ *   1. Build entries from mapping sources (SRG/TSRG/ProGuard/MCP CSV)
+ *   2. Download and parse client + server JARs to extract access/is_static/sideonly
+ *   3. Enrich entries with JAR data, filtering to intersection only
+ *   4. Write CSV cache
+ *   5. Clean up downloaded JAR files
+ *
+ * If JAR analysis fails, falls back to original entries (preserving existing is_static/sideonly).
  *
  * @param mcVersion Minecraft version (e.g., "1.12.2", "1.20.1")
  * @param cacheDir Directory to store cache files
@@ -33,7 +44,7 @@ export async function buildMappingCache(
   }
 
   const workflow = versionConfig.workflow;
-  let entries;
+  let entries: MappingEntry[];
 
   switch (workflow) {
     case 'legacy_srg':
@@ -52,6 +63,26 @@ export async function buildMappingCache(
       const _exhaustive: never = workflow;
       throw new Error(`Unknown workflow: ${_exhaustive}`);
     }
+  }
+
+  // Enrich entries with JAR-derived access/is_static/sideonly/obf_desc
+  // On failure, fall back to original entries (preserving existing is_static/sideonly)
+  try {
+    const jarLookup = await analyzeJars(mcVersion);
+    entries = enrichAndFilterEntries(entries, jarLookup);
+
+    // After JAR enrichment, fields now have obf_desc (type descriptor from JAR).
+    // Recompute deobf_desc for all entries using the class mapping.
+    const classMap = buildClassMapFromEntries(entries);
+    computeDeobfDesc(entries, classMap);
+  } catch (err) {
+    console.error('');
+    console.error(`[WARN] JAR analysis failed for MC ${mcVersion}, using fallback data:`);
+    console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`  Entries will use mapping-source is_static/sideonly (access will be empty)`);
+  } finally {
+    // Always clean up JAR cache, even on failure
+    cleanupJarCache();
   }
 
   writeCache(entries, mcVersion, resolvedCacheDir);

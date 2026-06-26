@@ -157,7 +157,7 @@ Modifiers:
   method — same columns, methods only
   field — same columns, fields only
   desc — obf_desc, deobf_desc
-  modifier — is_static (access is always empty, data sources lack access info)
+  modifier — access (public/private/protected/default), is_static (static/non-static)
   side — sideonly (common/server/client)
 
 Scoring: exact case hit = 1.0, case-insensitive = 0.5, then by mismatch (less unmatched chars ranks higher).

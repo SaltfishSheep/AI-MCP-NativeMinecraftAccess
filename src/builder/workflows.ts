@@ -58,11 +58,11 @@ function convertDescriptor(obfDesc: string, classMap: Map<string, string>): stri
 
 /**
  * Compute deobf_desc for all entries using the class mapping.
- * Only method entries with obf_desc get a computed deobf_desc.
+ * Processes any entry that has obf_desc (both methods and fields after JAR enrichment).
  */
-function computeDeobfDesc(entries: MappingEntry[], classMap: Map<string, string>): void {
+export function computeDeobfDesc(entries: MappingEntry[], classMap: Map<string, string>): void {
   for (const entry of entries) {
-    if (entry.type === 'method' && entry.obf_desc) {
+    if (entry.obf_desc) {
       entry.deobf_desc = convertDescriptor(entry.obf_desc, classMap);
     }
   }
@@ -142,7 +142,7 @@ function buildClassMap(
  * Build obf_class -> deobf_class lookup from already-merged MappingEntry array.
  * Used when class names come from ProGuard (not raw parser output).
  */
-function buildClassMapFromEntries(entries: MappingEntry[]): Map<string, string> {
+export function buildClassMapFromEntries(entries: MappingEntry[]): Map<string, string> {
   const classMap = new Map<string, string>();
   for (const entry of entries) {
     if (entry.obf_class && entry.deobf_class) {
