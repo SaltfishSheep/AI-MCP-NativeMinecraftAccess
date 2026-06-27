@@ -24,6 +24,12 @@ import { DEFAULT_LIMIT, ScoredMappingEntry } from './types.js';
 import { CACHE_DIR } from './util.js';
 import { getPackageVersion } from './util.js';
 
+// ── Build Lock ───────────────────────────────────────────────────────────────
+// Promise cache to prevent duplicate concurrent builds for the same MC version.
+// When multiple requests arrive simultaneously for a missing cache, only the
+// first one triggers the build; others await the same Promise.
+const buildingPromises = new Map<string, Promise<void>>();
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SUPPORTED_VERSIONS = Object.keys(VERSION_TABLE).sort();
@@ -208,9 +214,26 @@ Common patterns:
       }
 
       // Auto-build cache if missing or invalid
+      // Uses Promise cache to prevent duplicate concurrent builds:
+      // - First request triggers build and stores the Promise
+      // - Subsequent requests await the same Promise
       if (!validateCache(params.mc_version)) {
-        console.error(`[native-mc-access] Cache missing for MC ${params.mc_version}, building...`);
-        await buildMappingCache(params.mc_version, CACHE_DIR, true);
+        // Check if a build is already in progress for this version
+        if (!buildingPromises.has(params.mc_version)) {
+          console.error(`[native-mc-access] Cache missing for MC ${params.mc_version}, building...`);
+          // Start build and store Promise (cleanup on completion)
+          const buildPromise = buildMappingCache(params.mc_version, CACHE_DIR, true)
+            .finally(() => {
+              buildingPromises.delete(params.mc_version);
+            });
+          buildingPromises.set(params.mc_version, buildPromise);
+        } else {
+          console.error(`[native-mc-access] Build already in progress for MC ${params.mc_version}, waiting...`);
+        }
+
+        // Await the build (whether initiated by this request or another)
+        await buildingPromises.get(params.mc_version);
+
         if (!validateCache(params.mc_version)) {
           return {
             content: [
